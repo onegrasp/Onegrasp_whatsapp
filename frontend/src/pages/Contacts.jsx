@@ -61,7 +61,14 @@ export default function Contacts() {
   const [filterSet, setFilterSet] = useState("all");
   const [filterLabel, setFilterLabel] = useState("all");
   const [setCounts, setSetCounts] = useState({});
-  const [customSets, setCustomSets] = useState([]);
+  const [customSets, setCustomSets] = useState(() => {
+    try {
+      const saved = localStorage.getItem("wa_custom_contact_sets");
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
 
   // Modals & UI States
   const [showNewSetModal, setShowNewSetModal] = useState(false);
@@ -95,8 +102,13 @@ export default function Contacts() {
       setSetCounts(counts);
 
       const known = ["all", "test_contacts", "new_contacts", "none", "interested", "follow_up", "converted", "not_interested"];
-      const custom = Object.keys(counts).filter((k) => !known.includes(k));
-      setCustomSets(custom);
+      const dbCustom = Object.keys(counts).filter((k) => !known.includes(k));
+
+      setCustomSets((prev) => {
+        const merged = Array.from(new Set([...prev, ...dbCustom]));
+        localStorage.setItem("wa_custom_contact_sets", JSON.stringify(merged));
+        return merged;
+      });
     } catch (err) {
       console.error("Failed to load contact sets:", err);
     }
@@ -170,9 +182,11 @@ export default function Contacts() {
       if (selectedIds.length > 0) {
         await assignContactSet({ contactIds: selectedIds, setName: cleanName });
       }
-      if (!customSets.includes(cleanName)) {
-        setCustomSets((prev) => [...prev, cleanName]);
-      }
+      setCustomSets((prev) => {
+        const updated = Array.from(new Set([...prev, cleanName]));
+        localStorage.setItem("wa_custom_contact_sets", JSON.stringify(updated));
+        return updated;
+      });
       setFilterSet(cleanName);
       setUploadTargetSet(cleanName);
       setSingleTargetSet(cleanName);
