@@ -26,7 +26,9 @@ function Login({ onLoginSuccess }) {
       localStorage.setItem("token", res.data.token);
       onLoginSuccess(res.data.token);
     } catch (err) {
-      setError(err.response?.data?.error || "Invalid password or server error");
+      const errData = err.response?.data?.error;
+      const errorMsg = typeof errData === "object" ? errData.message : (errData || err.message || "Invalid password or server error");
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }

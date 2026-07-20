@@ -8,6 +8,7 @@ const apiLimiter = rateLimit({
   max: env.NODE_ENV === "production" ? 500 : 5000,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false },
   message: {
     success: false,
     error: {
@@ -23,6 +24,7 @@ const authLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false },
   message: {
     success: false,
     error: {
@@ -38,6 +40,7 @@ const sendLimiter = rateLimit({
   max: env.NODE_ENV === "production" ? 30 : 200,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false },
   message: {
     success: false,
     error: {
@@ -48,8 +51,8 @@ const sendLimiter = rateLimit({
 });
 
 const applySecurity = (app) => {
-  app.use(helmet());
-  app.set("trust proxy", 1);
+  app.use(helmet({ contentSecurityPolicy: false }));
+  app.set("trust proxy", true);
   app.use("/api", apiLimiter);
   app.use("/api/v1/auth", authLimiter);
   app.use("/api/v1/send-bulk", sendLimiter);
