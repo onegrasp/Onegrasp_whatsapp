@@ -13,6 +13,32 @@ import {
 import { useSocket } from "../context/SocketContext";
 import { getConversations } from "../services/api";
 
+const playNotificationDing = () => {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime); // A5 note (880Hz)
+    osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.08); // E6 note chime (1320Hz)
+
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+  } catch (err) {
+    console.warn("Notification sound could not play:", err);
+  }
+};
+
 const navItems = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/templates", icon: FileText, label: "Templates" },
@@ -43,13 +69,27 @@ export default function Sidebar() {
 
   useEffect(() => {
     if (!socket) return;
-    const handleMsg = () => fetchUnread();
-    socket.on("incoming_message", handleMsg);
-    socket.on("new_message", handleMsg);
+
+    const handleIncoming = (msg) => {
+      if (msg.direction === "incoming" || !msg.direction) {
+        playNotificationDing();
+      }
+      fetchUnread();
+    };
+
+    const handleNewMsg = (msg) => {
+      if (msg.direction === "incoming") {
+        playNotificationDing();
+      }
+      fetchUnread();
+    };
+
+    socket.on("incoming_message", handleIncoming);
+    socket.on("new_message", handleNewMsg);
 
     return () => {
-      socket.off("incoming_message", handleMsg);
-      socket.off("new_message", handleMsg);
+      socket.off("incoming_message", handleIncoming);
+      socket.off("new_message", handleNewMsg);
     };
   }, [socket]);
 
@@ -73,7 +113,7 @@ export default function Sidebar() {
             key={to}
             to={to}
             className={({ isActive }) =>
-              `flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors duration-150 group ${
+              `flex items-center justify-between px-3 py-2.5 rounded-lg transition-colors duration-150 group relative ${
                 isActive
                   ? "bg-wa-green/10 text-wa-green font-bold"
                   : "text-slate-600 hover:text-wa-green hover:bg-wa-green/10"
@@ -81,11 +121,18 @@ export default function Sidebar() {
             }
           >
             <div className="flex items-center gap-3">
-              <Icon size={18} className="shrink-0" />
+              <div className="relative">
+                <Icon size={18} className="shrink-0" />
+                {hasBadge && unreadTotal > 0 && (
+                  <span className="lg:hidden absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white font-extrabold text-[9px] rounded-full flex items-center justify-center animate-bounce shadow-sm">
+                    {unreadTotal > 9 ? "9+" : unreadTotal}
+                  </span>
+                )}
+              </div>
               <span className="hidden lg:block text-sm font-medium">{label}</span>
             </div>
             {hasBadge && unreadTotal > 0 && (
-              <span className="bg-red-500 text-white font-bold text-[10px] px-2 py-0.5 rounded-full animate-bounce shadow-sm">
+              <span className="hidden lg:flex bg-red-500 text-white font-extrabold text-[10px] h-5 min-w-[20px] px-1.5 rounded-full items-center justify-center animate-bounce shadow-sm shadow-red-500/30">
                 {unreadTotal}
               </span>
             )}

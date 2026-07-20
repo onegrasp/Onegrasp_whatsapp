@@ -4,6 +4,32 @@ import { getConversations, getMessages, sendSingleMessage, toggleImportantContac
 import { useSocket } from "../context/SocketContext";
 import MessageBubble from "../components/MessageBubble";
 
+const playNotificationDing = () => {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.08);
+
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+  } catch (err) {
+    console.warn("Notification sound error:", err);
+  }
+};
+
 const formatRelativeTime = (ts) => {
   if (!ts) return "";
   const now = Date.now();
@@ -166,6 +192,7 @@ export default function Chats() {
     });
 
     socket.on("incoming_message", (msg) => {
+      playNotificationDing();
       loadConversations();
       if (selectedPhone && isSamePhone(msg.phone, selectedPhone)) {
         setMessages((prev) => {
