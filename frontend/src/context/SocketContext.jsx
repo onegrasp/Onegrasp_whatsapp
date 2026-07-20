@@ -10,10 +10,11 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     let s = null;
     try {
+      const customUrl = import.meta.env.VITE_API_URL;
       const isDev = import.meta.env.DEV;
-      const socketUrl = isDev 
-        ? window.location.origin.replace("5173", "5000") 
-        : window.location.origin;
+      const socketUrl = customUrl
+        ? customUrl.replace(/\/+$/, "")
+        : (isDev ? window.location.origin.replace("5173", "5000") : window.location.origin);
 
       s = io(socketUrl, {
         transports: ["polling", "websocket"],
