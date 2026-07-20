@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { io } from "socket.io-client";
 
-const SocketContext = createContext({ socket: null, connected: false });
+const SocketContext = createContext(null);
 
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
@@ -10,11 +10,8 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     let s = null;
     try {
-      const customUrl = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://onegrasp-backend.onrender.com" : "");
-      const isDev = import.meta.env.DEV;
-      const socketUrl = customUrl
-        ? customUrl.replace(/\/+$/, "")
-        : (isDev ? window.location.origin.replace("5173", "5000") : window.location.origin);
+      const rawUrl = import.meta.env.VITE_API_URL || "https://onegrasp-backend.onrender.com";
+      const socketUrl = rawUrl.replace(/\/+$/, "").replace(/\/api\/v1$/, "");
 
       s = io(socketUrl, {
         transports: ["polling", "websocket"],
@@ -30,23 +27,13 @@ export const SocketProvider = ({ children }) => {
         setConnected(false);
       });
 
-      s.on("connect_error", (err) => {
-        setConnected(false);
-      });
-
       setSocket(s);
     } catch (err) {
-      console.warn("Socket initialization error:", err);
+      console.warn("Socket initialization skipped:", err);
     }
 
     return () => {
-      if (s) {
-        try {
-          s.disconnect();
-        } catch (e) {
-          // ignore cleanup errors
-        }
-      }
+      if (s) s.disconnect();
     };
   }, []);
 

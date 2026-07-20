@@ -1,16 +1,13 @@
 import axios from "axios";
 
-const getBaseUrl = () => {
-  const customUrl = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://onegrasp-backend.onrender.com" : "");
-  if (customUrl) {
-    const cleanUrl = customUrl.replace(/\/+$/, "");
-    return cleanUrl.endsWith("/api/v1") ? cleanUrl : `${cleanUrl}/api/v1`;
-  }
-  return "/api/v1";
-};
+const rawUrl = import.meta.env.VITE_API_URL || "https://onegrasp-backend.onrender.com";
+const cleanUrl = rawUrl.replace(/\/+$/, "");
+const baseURL = cleanUrl.endsWith("/api/v1") ? cleanUrl : `${cleanUrl}/api/v1`;
+
+console.log("[API] Connecting to backend at:", baseURL);
 
 const api = axios.create({
-  baseURL: getBaseUrl(),
+  baseURL,
   timeout: 30000,
 });
 
