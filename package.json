@@ -1,0 +1,13 @@
+{
+  "name": "whatsapp-bulk-system",
+  "version": "1.0.0",
+  "description": "WhatsApp Bulk Messaging System",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "vercel-build": "cd frontend && npm install && npm run build",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "start:backend": "cd backend && npm start"
+  }
+}
