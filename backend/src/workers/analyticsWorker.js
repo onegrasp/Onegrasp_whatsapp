@@ -1,4 +1,4 @@
-const logger = require("../../utils/logger");
+const logger = require("../utils/logger");
 
 const process = async (job) => {
   logger.info("analyticsWorker processing an analytics job", { jobId: job.id });

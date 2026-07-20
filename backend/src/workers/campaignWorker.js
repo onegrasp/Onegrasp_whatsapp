@@ -1,9 +1,9 @@
-const twilioService = require("../../services/twilioService");
-const messageRepository = require("../../repositories/messageRepository");
-const conversationRepository = require("../../repositories/conversationRepository");
-const contactRepository = require("../../repositories/contactRepository");
+const twilioService = require("../services/twilioService");
+const messageRepository = require("../repositories/messageRepository");
+const conversationRepository = require("../repositories/conversationRepository");
+const contactRepository = require("../repositories/contactRepository");
 const { getIo } = require("../socket");
-const logger = require("../../utils/logger");
+const logger = require("../utils/logger");
 
 const process = async (job) => {
   let result;

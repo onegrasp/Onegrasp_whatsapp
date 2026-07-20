@@ -1,9 +1,9 @@
-const jobRepository = require("../../repositories/jobRepository");
-const contactRepository = require("../../repositories/contactRepository");
-const messageRepository = require("../../repositories/messageRepository");
-const conversationRepository = require("../../repositories/conversationRepository");
+const jobRepository = require("../repositories/jobRepository");
+const contactRepository = require("../repositories/contactRepository");
+const messageRepository = require("../repositories/messageRepository");
+const conversationRepository = require("../repositories/conversationRepository");
 const { getIo } = require("../socket");
-const logger = require("../../utils/logger");
+const logger = require("../utils/logger");
 
 const scheduleRetry = async (job, err) => {
   const errorMsg = err.message || String(err);

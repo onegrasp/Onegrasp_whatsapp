@@ -1,4 +1,4 @@
-const logger = require("../../utils/logger");
+const logger = require("../utils/logger");
 
 const process = async (job) => {
   logger.info("templateSyncWorker processing a template sync job", { jobId: job.id });
