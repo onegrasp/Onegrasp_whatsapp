@@ -174,6 +174,8 @@ export default function Contacts() {
         setCustomSets((prev) => [...prev, cleanName]);
       }
       setFilterSet(cleanName);
+      setUploadTargetSet(cleanName);
+      setSingleTargetSet(cleanName);
       setNewSetName("");
       setShowNewSetModal(false);
       load();
@@ -370,7 +372,12 @@ export default function Contacts() {
           return (
             <button
               key={s.value}
-              onClick={() => { setFilterSet(s.value); setPage(1); }}
+              onClick={() => {
+                setFilterSet(s.value);
+                setUploadTargetSet(s.value);
+                setSingleTargetSet(s.value !== "all" ? s.value : "test_contacts");
+                setPage(1);
+              }}
               className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 select-none ${
                 active
                   ? "bg-wa-green text-slate-900 shadow-sm font-bold"
@@ -396,7 +403,12 @@ export default function Contacts() {
           return (
             <button
               key={setName}
-              onClick={() => { setFilterSet(setName); setPage(1); }}
+              onClick={() => {
+                setFilterSet(setName);
+                setUploadTargetSet(setName);
+                setSingleTargetSet(setName);
+                setPage(1);
+              }}
               className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 select-none ${
                 active
                   ? "bg-wa-green text-slate-900 shadow-sm font-bold"

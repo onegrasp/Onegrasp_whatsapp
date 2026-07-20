@@ -2,15 +2,39 @@ const supabase = require("../config/supabase");
 
 const contactRepository = {
   async upsert(phone, name, label = "none") {
-    const payload = { phone, name, deleted_at: null };
-    if (label && label !== "none") {
-      payload.label = label;
+    const cleanLabel = label && label !== "all" ? label.trim().toLowerCase().replace(/\s+/g, "_") : "none";
+    
+    // Fetch existing contact to merge tags if present
+    const { data: existing } = await supabase
+      .from("contacts")
+      .select("id, label, tags")
+      .eq("phone", phone)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    const payload = {
+      phone,
+      name,
+      deleted_at: null,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (cleanLabel !== "none") {
+      payload.label = cleanLabel;
+      const existingTags = Array.isArray(existing?.tags) ? existing.tags : [];
+      if (!existingTags.includes(cleanLabel)) {
+        payload.tags = [...existingTags, cleanLabel];
+      } else {
+        payload.tags = existingTags;
+      }
     }
+
     const { data, error } = await supabase
       .from("contacts")
       .upsert(payload, { onConflict: "phone" })
       .select()
       .single();
+
     if (error) throw error;
     return data;
   },
