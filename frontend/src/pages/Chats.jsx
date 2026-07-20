@@ -141,25 +141,58 @@ export default function Chats() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Phone Normalization Helper
+  const isSamePhone = (p1, p2) => {
+    if (!p1 || !p2) return false;
+    const c1 = p1.replace(/\D/g, "");
+    const c2 = p2.replace(/\D/g, "");
+    return c1 === c2 || c1.endsWith(c2) || c2.endsWith(c1);
+  };
+
   // Real-time updates
   useEffect(() => {
     if (!socket) return;
 
     socket.on("new_message", (msg) => {
       loadConversations();
-      if (msg.phone === selectedPhone) {
-        setMessages((prev) => [...prev, msg]);
+      if (selectedPhone && isSamePhone(msg.phone, selectedPhone)) {
+        setMessages((prev) => {
+          // Avoid duplicate messages if already optimistically added
+          const exists = prev.some((m) => m._id === msg._id || (m.messageId && m.messageId === msg.messageId));
+          if (exists) return prev;
+          return [...prev, msg];
+        });
+      }
+    });
+
+    socket.on("incoming_message", (msg) => {
+      loadConversations();
+      if (selectedPhone && isSamePhone(msg.phone, selectedPhone)) {
+        setMessages((prev) => {
+          const exists = prev.some((m) => m.text === msg.text && Math.abs(new Date(m.timestamp) - new Date(msg.timestamp)) < 3000);
+          if (exists) return prev;
+          return [...prev, {
+            _id: msg.messageId || "inc-" + Date.now(),
+            phone: msg.phone,
+            contact_name: msg.contactName,
+            text: msg.text,
+            direction: "incoming",
+            status: "delivered",
+            timestamp: msg.timestamp,
+          }];
+        });
       }
     });
 
     socket.on("status_update", ({ messageId, status }) => {
       setMessages((prev) =>
-        prev.map((m) => (m.messageId === messageId ? { ...m, status } : m))
+        prev.map((m) => (m.messageId === messageId || m._id === messageId ? { ...m, status } : m))
       );
     });
 
     return () => {
       socket.off("new_message");
+      socket.off("incoming_message");
       socket.off("status_update");
     };
   }, [socket, selectedPhone, loadConversations]);
@@ -168,22 +201,49 @@ export default function Chats() {
     if ((!msgInput.trim() && !attachmentUrl) || !selectedPhone || sending) return;
     const text = msgInput.trim();
     const mediaUrl = attachmentUrl;
+    const currentPhone = selectedPhone;
+
+    // Optimistic UI update for instant feedback
+    const tempId = "temp-" + Date.now();
+    const tempMsg = {
+      _id: tempId,
+      phone: currentPhone,
+      text,
+      mediaUrl,
+      direction: "outgoing",
+      status: "sending",
+      timestamp: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, tempMsg]);
     setMsgInput("");
     setAttachmentFile(null);
     setAttachmentUrl("");
     setSending(true);
 
     try {
-      await sendSingleMessage({
-        phone: selectedPhone,
+      const res = await sendSingleMessage({
+        phone: currentPhone,
         message: text || undefined,
         type: "text",
         mediaUrl: mediaUrl || undefined,
       });
+
+      // Update optimistic message status to sent
+      setMessages((prev) =>
+        prev.map((m) =>
+          m._id === tempId
+            ? { ...m, status: "sent", messageId: res.data?.messageId || m._id }
+            : m
+        )
+      );
+      loadConversations();
     } catch (err) {
-      alert(err.response?.data?.error || "Failed to send");
-      setMsgInput(text);
-      setAttachmentUrl(mediaUrl);
+      alert(err.response?.data?.error || "Failed to send message");
+      // Mark optimistic message as failed
+      setMessages((prev) =>
+        prev.map((m) => (m._id === tempId ? { ...m, status: "failed" } : m))
+      );
     } finally {
       setSending(false);
     }
