@@ -28,15 +28,30 @@ api.interceptors.request.use(
   }
 );
 
-// Intercept responses to unwrap error messages cleanly
+// Intercept responses to unwrap error messages cleanly and handle 401 auth expiry
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.data?.error) {
-      if (typeof error.response.data.error === "object" && error.response.data.error.message) {
-        error.response.data.error = error.response.data.error.message;
+    if (error.response?.status === 401) {
+      const isAuthLogin = error.config?.url?.includes("/auth/login");
+      if (!isAuthLogin) {
+        localStorage.removeItem("token");
+        window.location.href = "/";
       }
     }
+
+    if (error.response?.data?.error) {
+      if (typeof error.response.data.error === "object") {
+        error.response.data.error = error.response.data.error.message || JSON.stringify(error.response.data.error);
+      }
+    } else if (error.response?.data?.message) {
+      if (!error.response.data.error) {
+        error.response.data.error = error.response.data.message;
+      }
+    } else if (!error.response) {
+      error.message = "Unable to connect to server. Please check your internet connection.";
+    }
+
     return Promise.reject(error);
   }
 );

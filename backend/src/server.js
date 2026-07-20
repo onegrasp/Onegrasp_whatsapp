@@ -60,17 +60,22 @@ registerHandlers();
 
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
-// JWT Verification
-app.use(authenticateToken);
-
-// Mount Versioned API across all Vercel URL variants
-app.use("/api/v1", apiV1Router);
-app.use("/api", apiV1Router);
-app.use(apiV1Router);
-
+// Public Health Check Endpoint
 app.get("/", (req, res) => {
   res.json({ status: "WhatsApp System Running", timestamp: new Date() });
 });
+
+app.get("/health", (req, res) => {
+  res.json({ status: "healthy", timestamp: new Date() });
+});
+
+// JWT Verification for Protected Endpoints
+app.use(authenticateToken);
+
+// Mount Versioned API across all URL variants
+app.use("/api/v1", apiV1Router);
+app.use("/api", apiV1Router);
+app.use(apiV1Router);
 
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);
