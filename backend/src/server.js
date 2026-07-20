@@ -21,6 +21,16 @@ const { registerHandlers } = require("./events/handlers");
 const app = express();
 const server = http.createServer(app);
 
+// Serverless Socket IP Fallback Middleware
+app.use((req, res, next) => {
+  if (!req.socket) {
+    req.socket = { remoteAddress: req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || "127.0.0.1" };
+  } else if (!req.socket.remoteAddress) {
+    req.socket.remoteAddress = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || "127.0.0.1";
+  }
+  next();
+});
+
 // CORS & Parsers FIRST
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));

@@ -1,6 +1,14 @@
-const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const env = require("../config/env");
+
+const getClientIp = (req) => {
+  return (
+    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.headers["x-real-ip"] ||
+    req.socket?.remoteAddress ||
+    "127.0.0.1"
+  );
+};
 
 // General API rate limiter — generous for normal app usage
 const apiLimiter = rateLimit({
@@ -8,6 +16,7 @@ const apiLimiter = rateLimit({
   max: env.NODE_ENV === "production" ? 500 : 5000,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getClientIp,
   validate: { trustProxy: false },
   message: {
     success: false,
@@ -24,6 +33,7 @@ const authLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getClientIp,
   validate: { trustProxy: false },
   message: {
     success: false,
@@ -40,6 +50,7 @@ const sendLimiter = rateLimit({
   max: env.NODE_ENV === "production" ? 30 : 200,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: getClientIp,
   validate: { trustProxy: false },
   message: {
     success: false,
@@ -51,7 +62,6 @@ const sendLimiter = rateLimit({
 });
 
 const applySecurity = (app) => {
-  app.use(helmet({ contentSecurityPolicy: false }));
   app.set("trust proxy", true);
   app.use("/api", apiLimiter);
   app.use("/api/v1/auth", authLimiter);
