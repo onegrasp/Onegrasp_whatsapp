@@ -2,13 +2,14 @@ const jwt = require("jsonwebtoken");
 const env = require("../config/env");
 
 const authenticateToken = (req, res, next) => {
+  const p = req.path || req.originalUrl || "";
   if (
-    req.path.startsWith("/webhook/") ||
-    req.path === "/auth/login" ||
-    req.path === "/health" ||
-    req.path === "/ready" ||
-    req.path === "/live" ||
-    req.path === "/logs"
+    p.includes("/webhook") ||
+    p.includes("/auth/login") ||
+    p.includes("/health") ||
+    p.includes("/ready") ||
+    p.includes("/live") ||
+    p.includes("/jobs/process-queue")
   ) {
     return next();
   }
