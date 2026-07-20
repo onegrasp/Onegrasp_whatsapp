@@ -11,7 +11,7 @@
   "crons": [
     {
       "path": "/api/v1/jobs/process-queue",
-      "schedule": "* * * * *"
+      "schedule": "0 0 * * *"
     }
   ]
 }
