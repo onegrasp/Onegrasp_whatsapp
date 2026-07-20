@@ -41,15 +41,28 @@ const extractVariables = (text) => {
   return matches;
 };
 
-// Helper: is this template in a "draft-like" editable state?
+const SYSTEM_PLACEHOLDERS = [
+  { tag: "{{name}}", label: "Recipient Name", category: "Contact Info", description: "Dynamically inserts recipient's full name from contact database or CSV file", sample: "John Doe" },
+  { tag: "{{phone}}", label: "Recipient Phone", category: "Contact Info", description: "Dynamically inserts recipient's mobile phone number", sample: "+919876543210" },
+  { tag: "{{contact_name}}", label: "Contact Name (Alt)", category: "Contact Info", description: "Alternative placeholder tag for recipient's name", sample: "John Doe" },
+  { tag: "{{contact_phone}}", label: "Contact Phone (Alt)", category: "Contact Info", description: "Alternative placeholder tag for recipient's phone number", sample: "+919876543210" },
+  { tag: "{{1}}", label: "Meta Parameter {{1}}", category: "Meta Positional", description: "Meta-compliant 1st parameter tag", sample: "Welcome" },
+  { tag: "{{2}}", label: "Meta Parameter {{2}}", category: "Meta Positional", description: "Meta-compliant 2nd parameter tag", sample: "10%" },
+  { tag: "{{3}}", label: "Meta Parameter {{3}}", category: "Meta Positional", description: "Meta-compliant 3rd parameter tag", sample: "OFFER2026" },
+  { tag: "{{date}}", label: "Event / Appointment Date", category: "Event & Campaign", description: "Dynamic or custom event/webinar date", sample: "2026-07-25" },
+  { tag: "{{time}}", label: "Event / Appointment Time", category: "Event & Campaign", description: "Dynamic or custom event/webinar time", sample: "10:30 AM" },
+  { tag: "{{venue}}", label: "Location / Venue", category: "Event & Campaign", description: "Event venue or location details", sample: "Main Auditorium" },
+  { tag: "{{company}}", label: "Company / Business Name", category: "Business Info", description: "Your registered company or brand name", sample: "OneGrasp" },
+  { tag: "{{code}}", label: "Promo / Discount Code", category: "Promotional", description: "Custom promo or voucher code", sample: "SAVE50" },
+  { tag: "{{url}}", label: "Website Link", category: "Links", description: "Custom destination URL link", sample: "https://onegrasp.com" },
+];
+
 const isDraftLike = (status) =>
   !status || status === "draft" || status === "unsubmitted";
 
-// Helper: is this template in a "pending-like" state?
 const isPendingLike = (status) =>
   status === "pending" || status === "received";
 
-// Get a human-readable status label
 const getStatusLabel = (status) => {
   if (!status || status === "draft" || status === "unsubmitted") return "Draft";
   if (status === "pending" || status === "received") return "Pending";
@@ -58,7 +71,6 @@ const getStatusLabel = (status) => {
   return status;
 };
 
-// Get the template type including "media"
 const getTemplateType = (buttons, currentType) => {
   if (currentType === "media") return "media";
   if (buttons && buttons.length > 0) return "interactive";
@@ -85,6 +97,9 @@ export default function Templates() {
   const [headerImageUrl, setHeaderImageUrl] = useState("");
   const [uploadingMedia, setUploadingMedia] = useState(false);
 
+  const [showPlaceholderModal, setShowPlaceholderModal] = useState(false);
+  const [placeholderSearch, setPlaceholderSearch] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -93,7 +108,6 @@ export default function Templates() {
     fetchTemplatesList();
   }, []);
 
-  // Update variables whenever body text changes
   useEffect(() => {
     const vars = extractVariables(body);
     setVariables(vars);
@@ -106,6 +120,46 @@ export default function Templates() {
       return newSamples;
     });
   }, [body]);
+
+  const insertPlaceholder = (tag) => {
+    setBody((prev) => prev + (prev.endsWith(" ") || prev === "" ? "" : " ") + tag);
+  };
+
+  const allPlaceholders = useMemo(() => {
+    const customDiscovered = new Set();
+    templates.forEach((t) => {
+      const vars = extractVariables(t.body || "");
+      vars.forEach((v) => {
+        const formattedTag = `{{${v}}}`;
+        const isKnown = SYSTEM_PLACEHOLDERS.some((sp) => sp.tag.toLowerCase() === formattedTag.toLowerCase());
+        if (!isKnown) {
+          customDiscovered.add(v);
+        }
+      });
+    });
+
+    const extraItems = Array.from(customDiscovered).map((v) => ({
+      tag: `{{${v}}}`,
+      label: `Custom Auto-Discovered: {{${v}}}`,
+      category: "Auto-Discovered",
+      description: `Automatically registered variable placeholder {{${v}}}`,
+      sample: `Sample ${v}`,
+    }));
+
+    return [...SYSTEM_PLACEHOLDERS, ...extraItems];
+  }, [templates]);
+
+  const filteredPlaceholders = useMemo(() => {
+    if (!placeholderSearch.trim()) return allPlaceholders;
+    const q = placeholderSearch.toLowerCase();
+    return allPlaceholders.filter(
+      (item) =>
+        item.tag.toLowerCase().includes(q) ||
+        item.label.toLowerCase().includes(q) ||
+        item.description.toLowerCase().includes(q) ||
+        item.category.toLowerCase().includes(q)
+    );
+  }, [allPlaceholders, placeholderSearch]);
 
   const fetchTemplatesList = async () => {
     try {
@@ -230,7 +284,6 @@ export default function Templates() {
       };
 
       if (editingTemplate) {
-        // Use .id (Supabase UUID), NOT ._id
         const templateId = editingTemplate.id || editingTemplate._id;
         await updateTemplate(templateId, payload);
         setSuccess("Template updated successfully!");
@@ -320,7 +373,6 @@ export default function Templates() {
     }
   };
 
-  // Compile real-time preview text
   const compiledPreview = useMemo(() => {
     let preview = body;
     variables.forEach((v) => {
@@ -354,7 +406,6 @@ export default function Templates() {
     });
   }, [templates, search, filterCategory, filterStatus]);
 
-  // ─── Template Card Status Badge ─────────────────────────
   const StatusBadge = ({ status }) => {
     if (status === "approved") {
       return (
@@ -387,7 +438,6 @@ export default function Templates() {
     );
   };
 
-  // ─── Template Card Component ─────────────────────────────
   const TemplateCard = ({ t }) => {
     const tId = t.id || t._id;
     return (
@@ -414,7 +464,6 @@ export default function Templates() {
             {t.body}
           </p>
 
-          {/* Render buttons indicators if configured */}
           {t.buttons && t.buttons.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-2.5">
               {t.buttons.map((btn, index) => (
@@ -435,7 +484,6 @@ export default function Templates() {
             </div>
           )}
 
-          {/* Rejection Details Warning */}
           {t.status === "rejected" && (t.rejection_reason || t.rejectionReason) && (
             <div className="mt-2.5 bg-rose-50/40 border border-rose-100/40 rounded-xl p-2 text-[10px] text-rose-700 flex items-start gap-1">
               <AlertTriangle
@@ -447,7 +495,6 @@ export default function Templates() {
           )}
         </div>
 
-        {/* Card Actions */}
         <div className="flex items-center justify-between border-t border-slate-50 mt-4 pt-3">
           <div className="flex items-center gap-1.5">
             {isDraftLike(t.status) && (
@@ -510,7 +557,6 @@ export default function Templates() {
     );
   };
 
-  // Check if current editing template is in a locked state (submitted/approved)
   const isFormLocked = editingTemplate
     ? !isDraftLike(editingTemplate.status) && editingTemplate.status !== "rejected"
     : false;
@@ -669,12 +715,25 @@ export default function Templates() {
                   render previews.
                 </p>
               </div>
-              <button
-                onClick={handleCloseBuilder}
-                className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPlaceholderModal(true)}
+                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 text-[11px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all shadow-sm active:scale-[0.98]"
+                  title="View all dynamic placeholders and variable tags"
+                >
+                  <Sparkles size={13} className="text-emerald-600 shrink-0" />
+                  <span>Placeholders Guide</span>
+                </button>
+
+                <button
+                  onClick={handleCloseBuilder}
+                  className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                  title="Close template builder"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             {/* Panel Body (Dual Column Layout: Left Form, Right Preview) */}
@@ -820,14 +879,32 @@ export default function Templates() {
 
                 {/* Message Body */}
                 <div>
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
                     <label className="block text-[11px] font-semibold text-slate-600">
                       Message Body
                     </label>
-                    <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
-                      <HelpCircle size={10} />
-                      Use variables like {"{{name}}"} or {"{{1}}"}
-                    </span>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className="text-[10px] text-slate-400 mr-0.5 font-medium">Quick Insert:</span>
+                      {["{{name}}", "{{phone}}", "{{date}}", "{{venue}}", "{{1}}", "{{2}}"].map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          disabled={isFormLocked}
+                          onClick={() => insertPlaceholder(tag)}
+                          className="text-[10px] font-mono font-bold bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 text-slate-700 border border-slate-200/80 rounded-md px-1.5 py-0.5 transition-colors disabled:opacity-40"
+                        >
+                          + {tag}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setShowPlaceholderModal(true)}
+                        className="text-[10px] text-emerald-700 hover:underline font-bold ml-1 flex items-center gap-0.5"
+                      >
+                        <HelpCircle size={10} />
+                        View All
+                      </button>
+                    </div>
                   </div>
                   <textarea
                     rows={6}
@@ -836,9 +913,9 @@ export default function Templates() {
                     placeholder="Hello {{name}}, you are invited to the AI Research Summit on {{date}} at {{venue}}."
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-wa-green/60 text-slate-700 resize-none leading-relaxed disabled:opacity-50 disabled:bg-slate-50"
+                    className="w-full bg-white border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-wa-green/60 text-slate-700 resize-none leading-relaxed disabled:opacity-50 disabled:bg-slate-50 font-medium"
                   />
-                  <div className="text-[10px] text-slate-400 mt-0.5 text-right">
+                  <div className="text-[10px] text-slate-400 mt-0.5 text-right font-medium">
                     {body.length} characters
                   </div>
                 </div>
@@ -1076,6 +1153,93 @@ export default function Templates() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Placeholders & Variables Guide Modal */}
+      {showPlaceholderModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-2xl shadow-2xl space-y-4 animate-scale-up border border-slate-100 flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 font-bold shadow-sm">
+                  <Sparkles size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">Placeholders & Variable Guide</h3>
+                  <p className="text-xs text-slate-500">All dynamic variable tags available for personal custom messaging</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPlaceholderModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative">
+              <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search placeholders (e.g. {{name}}, {{date}}, {{1}}, {{venue}})..."
+                value={placeholderSearch}
+                onChange={(e) => setPlaceholderSearch(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-9 pr-3 text-xs focus:outline-none focus:border-wa-green text-slate-700"
+              />
+            </div>
+
+            {/* List of Placeholders */}
+            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+              {filteredPlaceholders.map((item, idx) => (
+                <div key={idx} className="bg-slate-50/70 border border-slate-200/60 rounded-2xl p-3 flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors">
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono font-bold text-xs bg-emerald-500/10 text-emerald-800 border border-emerald-500/20 px-2 py-0.5 rounded-lg select-all">
+                        {item.tag}
+                      </span>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded-md">
+                        {item.category}
+                      </span>
+                    </div>
+                    <p className="text-xs font-semibold text-slate-800">{item.label}</p>
+                    <p className="text-[11px] text-slate-500 leading-normal">{item.description}</p>
+                    {item.sample && (
+                      <p className="text-[10px] text-slate-400 font-mono">
+                        Sample value: <span className="text-emerald-700 font-bold">"{item.sample}"</span>
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      insertPlaceholder(item.tag);
+                      setShowPlaceholderModal(false);
+                    }}
+                    className="bg-wa-green hover:bg-wa-green-hover text-white font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1 shrink-0 shadow-sm transition-all active:scale-[0.98]"
+                  >
+                    + Insert
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Modal Footer Note */}
+            <div className="p-3 bg-emerald-50/70 border border-emerald-200/50 rounded-2xl text-[11px] text-emerald-800 flex items-center justify-between gap-2">
+              <span className="font-medium">
+                ✨ Any new custom column added to contacts or uploaded via CSV automatically registers here!
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowPlaceholderModal(false)}
+                className="text-xs font-bold text-emerald-800 hover:underline shrink-0"
+              >
+                Done
+              </button>
             </div>
           </div>
         </div>
