@@ -10,7 +10,7 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     let s = null;
     try {
-      const customUrl = import.meta.env.VITE_API_URL;
+      const customUrl = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://onegrasp-backend.onrender.com" : "");
       const isDev = import.meta.env.DEV;
       const socketUrl = customUrl
         ? customUrl.replace(/\/+$/, "")

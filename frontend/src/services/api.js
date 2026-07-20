@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const getBaseUrl = () => {
-  const customUrl = import.meta.env.VITE_API_URL;
+  const customUrl = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://onegrasp-backend.onrender.com" : "");
   if (customUrl) {
     const cleanUrl = customUrl.replace(/\/+$/, "");
     return cleanUrl.endsWith("/api/v1") ? cleanUrl : `${cleanUrl}/api/v1`;
