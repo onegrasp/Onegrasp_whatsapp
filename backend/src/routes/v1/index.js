@@ -16,12 +16,14 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
 
 // Auth login route
 router.post("/auth/login", (req, res) => {
-  const { password } = req.body;
-  if (password === ADMIN_PASSWORD) {
-    const token = jwt.sign({ role: "admin" }, JWT_SECRET, { expiresIn: "7d" });
+  const { password } = req.body || {};
+  const expectedPassword = process.env.ADMIN_PASSWORD || "admin123";
+  const jwtSecret = process.env.JWT_SECRET || "whatsapp-bulk-messaging-system-secret-key-12345";
+  if (password === expectedPassword) {
+    const token = jwt.sign({ role: "admin" }, jwtSecret, { expiresIn: "7d" });
     return res.json({ token });
   }
-  res.status(401).json({
+  return res.status(401).json({
     success: false,
     error: {
       code: "unauthorized",
