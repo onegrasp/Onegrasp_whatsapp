@@ -554,17 +554,48 @@ export default function BulkSender() {
 
           {/* Free text */}
           {msgType === "text" && (
-            <div className="mb-4">
-              <label className="block text-xs text-slate-400 mb-1.5">Message</label>
+            <div className="mb-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-slate-700">Custom Message</label>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setFreeText((prev) => prev + " {{name}}")}
+                    className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60 rounded-md px-2 py-0.5 hover:bg-emerald-100 transition-all"
+                    title="Insert recipient's dynamic contact name"
+                  >
+                    + {"{{name}}"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFreeText((prev) => prev + " {{phone}}")}
+                    className="text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-md px-2 py-0.5 hover:bg-slate-200 transition-all"
+                    title="Insert recipient's phone number"
+                  >
+                    + {"{{phone}}"}
+                  </button>
+                </div>
+              </div>
               <textarea
                 value={freeText}
                 onChange={(e) => setFreeText(e.target.value)}
-                placeholder="Type your message..."
+                placeholder="Hello {{name}}, you are invited to the AI Research Summit..."
                 rows={5}
-                className="input resize-none"
+                className="input resize-none text-xs font-medium leading-relaxed"
               />
-              <p className="text-xs text-yellow-400/80 mt-1">
-                ⚠ Free text only works for contacts who messaged you within 24 hrs.
+
+              {/* Live Personalization Preview */}
+              {freeText && (
+                <div className="p-2.5 bg-slate-50 border border-slate-200/60 rounded-xl text-[11px] text-slate-700 space-y-1">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Live Personalization Preview:</span>
+                  <p className="font-medium italic text-slate-800 break-words whitespace-pre-wrap">
+                    "{freeText.replace(/\{\{name\}\}/gi, "John Doe").replace(/\{\{phone\}\}/gi, "+919876543210")}"
+                  </p>
+                </div>
+              )}
+
+              <p className="text-[10px] text-slate-400">
+                💡 Placeholders like <code className="text-emerald-700 font-bold">{"{{name}}"}</code> automatically replace with each recipient's actual name from your contact list!
               </p>
             </div>
           )}

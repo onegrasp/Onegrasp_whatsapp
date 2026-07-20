@@ -77,23 +77,51 @@ const messageService = {
       throw new AppError(`Invalid phone number format: '${phone}'. Must follow E.164 standard.`, 400, "invalid_phone");
     }
 
+    const contact = await contactRepository.findByPhone(formatted);
+    const contactName = contact?.name || formatted;
+
+    // Personalize message text with contact placeholders
+    let personalizedMessage = message || "";
+    if (personalizedMessage) {
+      personalizedMessage = personalizedMessage
+        .replace(/\{\{name\}\}/gi, contactName)
+        .replace(/\{\{contact_name\}\}/gi, contactName)
+        .replace(/\{\{phone\}\}/gi, formatted)
+        .replace(/\{\{contact_phone\}\}/gi, formatted);
+    }
+
+    // Personalize template params
+    let personalizedParams = [];
+    if (params && Array.isArray(params)) {
+      personalizedParams = params.map((p) => {
+        if (typeof p === "string") {
+          if (p === "{{contact_name}}" || p.toLowerCase() === "{{name}}") {
+            return contactName;
+          }
+          if (p === "{{contact_phone}}" || p.toLowerCase() === "{{phone}}") {
+            return formatted;
+          }
+        }
+        return p;
+      });
+    }
+
     try {
       let result;
       if (type === "template") {
-        result = params.length > 0
-          ? await twilioService.sendTemplateWithParams(formatted, templateName, params)
+        result = personalizedParams.length > 0
+          ? await twilioService.sendTemplateWithParams(formatted, templateName, personalizedParams)
           : await twilioService.sendTemplateMessage(formatted, templateName);
       } else {
-        result = await twilioService.sendTextMessage(formatted, message, mediaUrl);
+        result = await twilioService.sendTextMessage(formatted, personalizedMessage, mediaUrl);
       }
 
       const messageSid = result?.messages?.[0]?.id || "";
-      const contact = await contactRepository.findByPhone(formatted);
 
       const savedMsg = await messageRepository.create({
         phone: formatted,
-        contact_name: contact?.name || "",
-        text: message || `[Template: ${templateName}]`,
+        contact_name: contactName,
+        text: personalizedMessage || `[Template: ${templateName}]`,
         type,
         direction: "outgoing",
         status: "sent",
@@ -104,7 +132,7 @@ const messageService = {
 
       await conversationRepository.upsert({
         phone: formatted,
-        contact_name: contact?.name || formatted,
+        contact_name: contactName,
         last_message: savedMsg.text,
         last_direction: "outgoing",
         last_status: "sent",
@@ -131,13 +159,12 @@ const messageService = {
       const errorCategory = err.category || "other";
 
       try {
-        const contact = await contactRepository.findByPhone(formatted);
-        const failText = message || `[Template: ${templateName}]`;
+        const failText = personalizedMessage || `[Template: ${templateName}]`;
         const failTime = new Date().toISOString();
 
         const savedMsg = await messageRepository.create({
           phone: formatted,
-          contact_name: contact?.name || "",
+          contact_name: contactName,
           text: failText,
           type,
           direction: "outgoing",
@@ -150,7 +177,7 @@ const messageService = {
 
         await conversationRepository.upsert({
           phone: formatted,
-          contact_name: contact?.name || formatted,
+          contact_name: contactName,
           last_message: failText,
           last_direction: "outgoing",
           last_status: "failed",
@@ -161,7 +188,7 @@ const messageService = {
           io.emit("new_message", {
             _id: savedMsg?.id,
             phone: formatted,
-            contactName: contact?.name || "",
+            contactName: contactName,
             text: failText,
             type: type,
             direction: "outgoing",

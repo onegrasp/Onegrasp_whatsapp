@@ -6,22 +6,50 @@ const { getIo } = require("../socket");
 const logger = require("../utils/logger");
 
 const process = async (job) => {
+  const contact = await contactRepository.findByPhone(job.phone);
+  const contactName = contact?.name || job.phone;
+
+  // 1. Personalize text message if placeholders like {{name}} or {{phone}} are present
+  let personalizedMessage = job.message || "";
+  if (personalizedMessage) {
+    personalizedMessage = personalizedMessage
+      .replace(/\{\{name\}\}/gi, contactName)
+      .replace(/\{\{contact_name\}\}/gi, contactName)
+      .replace(/\{\{phone\}\}/gi, job.phone)
+      .replace(/\{\{contact_phone\}\}/gi, job.phone);
+  }
+
+  // 2. Personalize template params array if placeholders like {{contact_name}} or {{name}} are passed
+  let personalizedParams = [];
+  if (job.params && Array.isArray(job.params)) {
+    personalizedParams = job.params.map((p) => {
+      if (typeof p === "string") {
+        if (p === "{{contact_name}}" || p.toLowerCase() === "{{name}}") {
+          return contactName;
+        }
+        if (p === "{{contact_phone}}" || p.toLowerCase() === "{{phone}}") {
+          return job.phone;
+        }
+      }
+      return p;
+    });
+  }
+
   let result;
   if (job.type === "template") {
-    result = job.params && job.params.length > 0
-      ? await twilioService.sendTemplateWithParams(job.phone, job.template_name, job.params, job.media_url)
+    result = personalizedParams.length > 0
+      ? await twilioService.sendTemplateWithParams(job.phone, job.template_name, personalizedParams, job.media_url)
       : await twilioService.sendTemplateMessage(job.phone, job.template_name, job.media_url);
   } else {
-    result = await twilioService.sendTextMessage(job.phone, job.message, job.media_url);
+    result = await twilioService.sendTextMessage(job.phone, personalizedMessage, job.media_url);
   }
 
   const messageSid = result?.messages?.[0]?.id || result?.sid || "";
-  const contact = await contactRepository.findByPhone(job.phone);
 
   const savedMsg = await messageRepository.create({
     phone: job.phone,
-    contact_name: contact?.name || "",
-    text: job.message || `[Template: ${job.template_name}]`,
+    contact_name: contactName,
+    text: personalizedMessage || `[Template: ${job.template_name}]`,
     type: job.type === "template" ? "template" : "text",
     direction: "outgoing",
     status: "sent",
@@ -33,7 +61,7 @@ const process = async (job) => {
 
   await conversationRepository.upsert({
     phone: job.phone,
-    contact_name: contact?.name || job.phone,
+    contact_name: contactName,
     last_message: savedMsg.text,
     last_direction: "outgoing",
     last_status: "sent",
