@@ -183,9 +183,29 @@ export default function Chats() {
       loadConversations();
       if (selectedPhone && isSamePhone(msg.phone, selectedPhone)) {
         setMessages((prev) => {
-          // Avoid duplicate messages if already optimistically added
-          const exists = prev.some((m) => m._id === msg._id || (m.messageId && m.messageId === msg.messageId));
+          // Check if this exact message already exists
+          const exists = prev.some(
+            (m) =>
+              m._id === msg._id ||
+              (m.messageId && msg.messageId && m.messageId === msg.messageId)
+          );
           if (exists) return prev;
+
+          // Check if there is an optimistic temp message matching text and direction
+          const tempIndex = prev.findIndex(
+            (m) =>
+              typeof m._id === "string" &&
+              m._id.startsWith("temp-") &&
+              m.text === msg.text &&
+              m.direction === msg.direction
+          );
+
+          if (tempIndex !== -1) {
+            const updated = [...prev];
+            updated[tempIndex] = msg;
+            return updated;
+          }
+
           return [...prev, msg];
         });
       }
@@ -196,7 +216,12 @@ export default function Chats() {
       loadConversations();
       if (selectedPhone && isSamePhone(msg.phone, selectedPhone)) {
         setMessages((prev) => {
-          const exists = prev.some((m) => m.text === msg.text && Math.abs(new Date(m.timestamp) - new Date(msg.timestamp)) < 3000);
+          const exists = prev.some(
+            (m) =>
+              m.text === msg.text &&
+              m.direction === "incoming" &&
+              Math.abs(new Date(m.timestamp) - new Date(msg.timestamp)) < 3000
+          );
           if (exists) return prev;
           return [...prev, {
             _id: msg.messageId || "inc-" + Date.now(),
@@ -504,9 +529,17 @@ export default function Chats() {
               </div>
             ) : (
               <div className="space-y-1">
-                {messages.map((msg) => (
-                  <MessageBubble key={msg._id} message={msg} />
-                ))}
+                {messages
+                  .filter((msg, index, self) =>
+                    index === self.findIndex((m) =>
+                      (m._id && msg._id && m._id === msg._id) ||
+                      (m.messageId && msg.messageId && m.messageId === msg.messageId) ||
+                      (m.text === msg.text && m.direction === msg.direction && Math.abs(new Date(m.timestamp) - new Date(msg.timestamp)) < 3000)
+                    )
+                  )
+                  .map((msg) => (
+                    <MessageBubble key={msg._id || msg.messageId} message={msg} />
+                  ))}
                 <div ref={bottomRef} />
               </div>
             )}
