@@ -270,9 +270,10 @@ export default function Contacts() {
   };
 
   const totalPages = Math.ceil(total / limit);
+  const selectedSet = new Set(selectedIds);
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-5 bg-slate-50/50">
+    <div className="h-full overflow-y-auto p-6 space-y-5 bg-slate-50/50 will-change-scroll">
       {/* Top Title & Search Bar */}
       <div className="flex items-center justify-between flex-wrap gap-4 bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
         <div>
@@ -517,11 +518,11 @@ export default function Contacts() {
                 </tr>
               ) : (
                 contacts.map((c) => {
-                  const isChecked = selectedIds.includes(c._id);
+                  const isChecked = selectedSet.has(c._id);
                   return (
                     <tr
                       key={c._id}
-                      className={`border-b border-slate-50 hover:bg-slate-50/60 transition-colors ${
+                      className={`border-b border-slate-50 hover:bg-slate-50/80 ${
                         isChecked ? "bg-wa-green/5" : ""
                       }`}
                     >

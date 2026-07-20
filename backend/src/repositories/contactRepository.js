@@ -83,14 +83,20 @@ const contactRepository = {
 
     (data || []).forEach((c) => {
       setCounts.all++;
+      const contactSets = new Set();
+
       if (c.label && c.label !== "none") {
-        setCounts[c.label] = (setCounts[c.label] || 0) + 1;
+        contactSets.add(c.label);
       }
       if (c.tags && Array.isArray(c.tags)) {
         c.tags.forEach((tag) => {
-          if (tag) setCounts[tag] = (setCounts[tag] || 0) + 1;
+          if (tag) contactSets.add(tag);
         });
       }
+
+      contactSets.forEach((setName) => {
+        setCounts[setName] = (setCounts[setName] || 0) + 1;
+      });
     });
 
     return setCounts;
