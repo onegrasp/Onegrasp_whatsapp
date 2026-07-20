@@ -69,18 +69,23 @@ io.on("connection", (socket) => {
 });
 
 const PROCESS_TYPE = env.PROCESS_TYPE;
+const isVercel = Boolean(process.env.VERCEL || process.env.NOW_REGION);
 
-if (PROCESS_TYPE === "all" || PROCESS_TYPE === "worker") {
-  queueWorker.start(io);
-}
+if (!isVercel) {
+  if (PROCESS_TYPE === "all" || PROCESS_TYPE === "worker") {
+    queueWorker.start(io);
+  }
 
-const PORT = env.PORT;
-if (PROCESS_TYPE === "all" || PROCESS_TYPE === "web") {
-  server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT} in [${PROCESS_TYPE}] mode.`);
-  });
+  const PORT = env.PORT;
+  if (PROCESS_TYPE === "all" || PROCESS_TYPE === "web") {
+    server.listen(PORT, () => {
+      console.log(`Server running on port ${PORT} in [${PROCESS_TYPE}] mode.`);
+    });
+  } else {
+    console.log(`Background worker running in [${PROCESS_TYPE}] mode.`);
+  }
 } else {
-  console.log(`Background worker running in [${PROCESS_TYPE}] mode.`);
+  console.log("Running in Vercel Serverless environment.");
 }
 
 app.use(errorHandler);
