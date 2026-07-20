@@ -305,7 +305,14 @@ export default function Chats() {
         {/* Search & Settings header */}
         <div className="p-4 border-b border-slate-100">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-bold text-slate-800">Chats</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-800">Chats</h2>
+              {conversations.reduce((acc, c) => acc + (c.unreadCount || 0), 0) > 0 && (
+                <span className="bg-emerald-500/15 text-emerald-700 font-bold text-[10px] px-2.5 py-0.5 rounded-full border border-emerald-500/25 animate-pulse">
+                  {conversations.reduce((acc, c) => acc + (c.unreadCount || 0), 0)} Unread
+                </span>
+              )}
+            </div>
             <button
               onClick={() => setShowAutoReplyModal(true)}
               className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md transition-all duration-150 border border-slate-100 ${
@@ -373,9 +380,16 @@ export default function Chats() {
                     <span className="text-slate-800 text-xs font-bold truncate group-hover:text-wa-dark transition-colors">
                       {conv.name || conv.phone}
                     </span>
-                    <span className="text-slate-400 text-[10px] ml-2 shrink-0 font-medium">
-                      {formatRelativeTime(conv.lastTimestamp)}
-                    </span>
+                    <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                      {conv.unreadCount > 0 && (
+                        <span className="bg-emerald-500 text-slate-900 font-extrabold text-[10px] h-4.5 min-w-[18px] px-1 rounded-full flex items-center justify-center shadow-sm animate-pulse">
+                          {conv.unreadCount}
+                        </span>
+                      )}
+                      <span className="text-slate-400 text-[10px] font-medium">
+                        {formatRelativeTime(conv.lastTimestamp)}
+                      </span>
+                    </div>
                   </div>
                   <p className="text-slate-400 text-xs truncate mt-1 leading-normal">
                     {conv.lastDirection === "outgoing" ? "You: " : ""}
