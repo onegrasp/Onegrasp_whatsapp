@@ -230,7 +230,7 @@ export default function BulkSender() {
     setSending(true);
 
     try {
-      await sendBulkMessages({
+      const res = await sendBulkMessages({
         phones: selectedPhones,
         templateName: templateNameToSend,
         message: msgType === "text" ? freeText : undefined,
@@ -240,6 +240,15 @@ export default function BulkSender() {
         mediaUrl: campaignMediaUrl || undefined,
         scheduledAt: scheduledAtISO,
       });
+
+      if (isScheduled) {
+        setSending(false);
+        const formattedDate = new Date(scheduledTime).toLocaleString();
+        alert(`🗓️ Campaign successfully scheduled!\n\nIt will start automatically on ${formattedDate} for ${selectedPhones.length} contacts.`);
+        setIsScheduled(false);
+        setScheduledTime("");
+        setCampaignName("");
+      }
     } catch (err) {
       setError(err.response?.data?.error || "Failed to start campaign");
       setSending(false);

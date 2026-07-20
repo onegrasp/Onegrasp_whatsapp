@@ -1023,7 +1023,7 @@ export default function Templates() {
                           <img
                             src={headerImageUrl}
                             alt="Header Preview"
-                            className="w-full h-32 object-cover"
+                            className="w-full h-auto max-h-[380px] object-contain bg-slate-900/5 rounded-t-2xl"
                           />
                         ) : (
                           <div className="bg-slate-100 h-32 flex items-center justify-center">

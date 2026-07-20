@@ -27,6 +27,7 @@ export default function MessageBubble({ message }) {
   const isOutgoing = message.direction === "outgoing";
   const rawText = message.text || "";
   const isRawTemplate = rawText.startsWith("[Template:");
+  const mediaUrl = message.mediaUrl || message.media_url || message.media;
   
   let templateId = message.templateName || "";
   let displayText = rawText;
@@ -49,12 +50,22 @@ export default function MessageBubble({ message }) {
             : "bg-white border border-slate-100 text-slate-900 rounded-tl-none"
         }`}
       >
+        {mediaUrl ? (
+          <div className="my-1.5 overflow-hidden rounded-xl bg-slate-900/5 border border-slate-200/60">
+            <img
+              src={mediaUrl}
+              alt="Campaign Media"
+              className="w-full h-auto max-h-[420px] object-contain rounded-xl"
+            />
+          </div>
+        ) : null}
+
         {displayText ? (
           <p className="break-words font-medium whitespace-pre-wrap">{displayText}</p>
         ) : null}
 
         {templateId ? (
-          <div className={`${displayText ? "mt-1.5" : ""} flex items-center gap-1.5 text-[11px] font-mono bg-emerald-500/10 text-emerald-800 border border-emerald-500/20 rounded-lg px-2.5 py-1`}>
+          <div className={`${displayText || mediaUrl ? "mt-1.5" : ""} flex items-center gap-1.5 text-[11px] font-mono bg-emerald-500/10 text-emerald-800 border border-emerald-500/20 rounded-lg px-2.5 py-1`}>
             <FileText size={12} className="text-emerald-600 shrink-0" />
             <span className="truncate">Template ID: <strong className="font-bold">{templateId}</strong></span>
           </div>
