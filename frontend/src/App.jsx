@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Analytics } from "@vercel/analytics/react";
 import { SocketProvider } from "./context/SocketContext";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
@@ -116,6 +117,7 @@ export default function App() {
             </Routes>
           </main>
         </div>
+        <Analytics />
       </BrowserRouter>
     </SocketProvider>
   );
