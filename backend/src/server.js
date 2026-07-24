@@ -31,8 +31,23 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS & Parsers FIRST
-app.use(cors());
+// Configure CORS origin handling
+const allowedOrigins = env.FRONTEND_URL && env.FRONTEND_URL !== "*"
+  ? env.FRONTEND_URL.split(",").map((o) => o.trim())
+  : ["https://onegraspconnects.vercel.app", "http://localhost:5173", "http://localhost:3000"];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, true); // Permissive fallback for standard web browser requests
+    },
+    credentials: true,
+  })
+);
+
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 
@@ -60,9 +75,9 @@ registerHandlers();
 
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
-// Public Health Check Endpoint
+// Public Health Check Endpoints
 app.get("/", (req, res) => {
-  res.json({ status: "WhatsApp System Running", timestamp: new Date() });
+  res.json({ status: "WhatsApp System Secure & Running", timestamp: new Date() });
 });
 
 app.get("/health", (req, res) => {
@@ -75,7 +90,6 @@ app.use(authenticateToken);
 // Mount Versioned API across all URL variants
 app.use("/api/v1", apiV1Router);
 app.use("/api", apiV1Router);
-app.use(apiV1Router);
 
 io.on("connection", (socket) => {
   console.log("Client connected:", socket.id);

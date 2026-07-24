@@ -1,4 +1,5 @@
 const rateLimit = require("express-rate-limit");
+const helmet = require("helmet");
 const env = require("../config/env");
 
 const getClientIp = (req) => {
@@ -10,7 +11,7 @@ const getClientIp = (req) => {
   );
 };
 
-// General API rate limiter — generous for normal app usage
+// General API rate limiter — generous for normal app usage (500 requests / 15 mins)
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: env.NODE_ENV === "production" ? 500 : 5000,
@@ -27,10 +28,10 @@ const apiLimiter = rateLimit({
   },
 });
 
-// Strict limiter for auth endpoints only (prevent brute-force)
+// Strict limiter for auth login endpoint (anti-brute-force: max 10 attempts / 15 mins)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getClientIp,
@@ -39,12 +40,12 @@ const authLimiter = rateLimit({
     success: false,
     error: {
       code: "rate_limit",
-      message: "Too many login attempts, please try again after 15 minutes",
+      message: "Too many failed login attempts. Please try again after 15 minutes.",
     },
   },
 });
 
-// Strict limiter for send endpoints (prevent message spam)
+// Strict limiter for message broadcast endpoints (prevent spamming: max 30 sends / min)
 const sendLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
   max: env.NODE_ENV === "production" ? 30 : 200,
@@ -56,15 +57,31 @@ const sendLimiter = rateLimit({
     success: false,
     error: {
       code: "rate_limit",
-      message: "Too many messages sent, please slow down",
+      message: "Too many broadcast operations initiated, please wait a minute before retrying.",
     },
   },
 });
 
 const applySecurity = (app) => {
-  app.set("trust proxy", true);
+  // Trust proxy for accurate IP resolution behind Vercel/Render reverse proxies
+  app.set("trust proxy", 1);
+  app.disable("x-powered-by");
+
+  // Apply Helmet HTTP security headers
+  app.use(
+    helmet({
+      contentSecurityPolicy: false, // Allows flexible cross-origin media rendering
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+      frameguard: { action: "deny" }, // Prevents clickjacking in iframe embeds
+      noSniff: true, // Prevents MIME-type sniffing
+      xssFilter: true, // Anti-XSS header protection
+    })
+  );
+
+  // Apply rate limiters across sensitive route clusters
   app.use("/api", apiLimiter);
   app.use("/api/v1/auth", authLimiter);
+  app.use("/api/auth", authLimiter);
   app.use("/api/v1/send-bulk", sendLimiter);
   app.use("/api/v1/send-message", sendLimiter);
 };
