@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "WhatsApp Bulk Messaging System",
   "scripts": {
-    "build": "cd backend && npm install && cd ../frontend && npm install && npm run build",
-    "vercel-build": "cd backend && npm install && cd ../frontend && npm install && npm run build",
+    "build": "node -e \"const fs = require('fs'), { execSync } = require('child_process'); if (fs.existsSync('frontend')) { execSync('cd frontend && npm run build', { stdio: 'inherit' }); } else { execSync('npm run build', { stdio: 'inherit' }); }\"",
+    "vercel-build": "node -e \"const fs = require('fs'), { execSync } = require('child_process'); if (fs.existsSync('frontend')) { execSync('cd frontend && npm run build', { stdio: 'inherit' }); } else { execSync('npm run build', { stdio: 'inherit' }); }\"",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",

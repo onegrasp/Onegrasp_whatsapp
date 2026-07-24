@@ -1,5 +1,7 @@
 {
   "version": 2,
+  "buildCommand": "node -e \"const fs = require('fs'), { execSync } = require('child_process'); if (fs.existsSync('frontend')) { execSync('cd frontend && npm run build', { stdio: 'inherit' }); } else { execSync('npm run build', { stdio: 'inherit' }); }\"",
+  "outputDirectory": "frontend/dist",
   "rewrites": [
     {
       "source": "/(.*)",
