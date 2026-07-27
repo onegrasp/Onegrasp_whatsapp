@@ -110,8 +110,8 @@ const messageService = {
       let result;
       if (type === "template") {
         result = personalizedParams.length > 0
-          ? await twilioService.sendTemplateWithParams(formatted, templateName, personalizedParams)
-          : await twilioService.sendTemplateMessage(formatted, templateName);
+          ? await twilioService.sendTemplateWithParams(formatted, templateName, personalizedParams, mediaUrl)
+          : await twilioService.sendTemplateMessage(formatted, templateName, mediaUrl);
       } else {
         result = await twilioService.sendTextMessage(formatted, personalizedMessage, mediaUrl);
       }

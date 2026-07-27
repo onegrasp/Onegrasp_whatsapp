@@ -6,8 +6,13 @@ const mapTwilioError = (err) => {
   if (code) {
     switch (code) {
       case 63016:
+      case 63018:
         category = "session_window_expired";
-        message = `Twilio Error 63016: Outside 24-hour window. WhatsApp policy requires sending an approved Template, or the customer must message your WhatsApp number first.`;
+        message = `Twilio Error ${code}: Outside 24-hour window. WhatsApp policy requires sending an approved Template, or the customer must message your WhatsApp number first.`;
+        break;
+      case 21610:
+        category = "opt_out";
+        message = `Twilio Error 21610: Recipient has opted out of receiving messages.`;
         break;
       case 21614:
       case 21211:
@@ -22,9 +27,6 @@ const mapTwilioError = (err) => {
         break;
       case 20003:
         category = "auth_error";
-        break;
-      case 63018:
-        category = "opt_out";
         break;
       default:
         category = "other";

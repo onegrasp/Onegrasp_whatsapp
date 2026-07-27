@@ -16,7 +16,8 @@ const scheduleRetry = async (job, err) => {
     errorCategory === "invalid_phone" ||
     errorCategory === "template_rejection" ||
     errorCategory === "auth_error" ||
-    errorCategory === "opt_out";
+    errorCategory === "opt_out" ||
+    errorCategory === "session_window_expired";
 
   const nextAttempts = job.attempts + 1;
 

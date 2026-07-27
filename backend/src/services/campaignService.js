@@ -123,9 +123,10 @@ const campaignService = {
       const contact = contactMap[formatted];
       const contactName = contact?.name || "Customer";
 
-      if (contact && contact.is_active === false) {
+      const isExplicitOptOut = await contactRepository.isOptedOut(formatted);
+      if (type !== "template" && contact && contact.is_active === false && isExplicitOptOut) {
         immediateFailures++;
-        logger.warn(`Phone number campaign send skipped: contact is inactive/opted-out: ${formatted}`);
+        logger.warn(`Phone number campaign send skipped: contact is explicitly opted-out: ${formatted}`);
 
         const failText = message || `[Template: ${templateName}]`;
         const failTime = new Date().toISOString();
@@ -136,7 +137,7 @@ const campaignService = {
           type: type === "template" ? "template" : "text",
           direction: "outgoing",
           status: "failed",
-          error_details: "Contact has opted out or is inactive.",
+          error_details: "Contact has opted out.",
           error_category: "opt_out",
           campaign_id: campaign.id,
           timestamp: failTime,

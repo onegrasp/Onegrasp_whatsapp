@@ -249,13 +249,59 @@ const contactRepository = {
   },
 
   async getContactsByPhones(phones) {
+    const rawPhones = Array.from(new Set(phones.flatMap(p => [p, p.replace(/^\+/, ""), `+${p.replace(/^\+/, "")}`])));
     const { data, error } = await supabase
       .from("contacts")
       .select("phone, name, is_active")
-      .in("phone", phones)
+      .in("phone", rawPhones)
       .is("deleted_at", null);
     if (error) throw error;
     return data;
+  },
+
+  async deactivateByPhone(phone) {
+    const clean = phone.replace(/^\+/, "");
+    const { data, error } = await supabase
+      .from("contacts")
+      .update({ is_active: false })
+      .or(`phone.eq.${phone},phone.eq.${clean},phone.eq.+${clean}`);
+
+    try {
+      await supabase.from("opt_outs").upsert({ phone, reason: "user_opt_out" }, { onConflict: "phone" });
+    } catch (e) {
+      // Ignore opt_outs table insert errors if table doesn't exist yet
+    }
+    return data;
+  },
+
+  async isOptedOut(phone) {
+    try {
+      const clean = phone.replace(/^\+/, "");
+      const { data } = await supabase
+        .from("opt_outs")
+        .select("id")
+        .or(`phone.eq.${phone},phone.eq.${clean},phone.eq.+${clean}`)
+        .maybeSingle();
+      return Boolean(data);
+    } catch (e) {
+      return false;
+    }
+  },
+
+  async reactivateAllNonOptOutContacts() {
+    try {
+      const { data: optOuts } = await supabase.from("opt_outs").select("phone");
+      const optOutPhones = (optOuts || []).map(o => o.phone).filter(Boolean);
+
+      let query = supabase.from("contacts").update({ is_active: true }).eq("is_active", false);
+      if (optOutPhones.length > 0) {
+        query = query.not("phone", "in", `(${optOutPhones.join(",")})`);
+      }
+      await query;
+    } catch (e) {
+      // Fallback: simple reset if opt_outs table query fails
+      await supabase.from("contacts").update({ is_active: true }).eq("is_active", false);
+    }
   },
 
   async deleteBulk(ids) {

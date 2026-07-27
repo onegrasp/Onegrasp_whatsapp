@@ -1,5 +1,5 @@
 require("dotenv").config();
-const { validateAndFormatE164 } = require("../utils/phone");
+const { validateAndFormatE164 } = require("../src/utils/phone");
 const assert = require("assert");
 
 const runTests = async () => {
@@ -31,7 +31,7 @@ const runTests = async () => {
     console.warn("⚠️ SUPABASE_URL or SUPABASE_KEY is missing from environment. Skipping client initialization check.");
   } else {
     try {
-      const supabase = require("../utils/supabase");
+      const supabase = require("../src/config/supabase");
       assert.ok(supabase);
       console.log("✔ Supabase client initialized successfully.");
     } catch (err) {

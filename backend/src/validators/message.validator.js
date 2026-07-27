@@ -10,9 +10,9 @@ const sendMessageSchema = z.object({
 }).refine(
   (data) => {
     if (data.type === "template") return !!data.templateName;
-    return !!data.message;
+    return !!data.message || !!data.mediaUrl;
   },
-  { message: "Message is required for text type, or templateName is required for template type" }
+  { message: "Message or mediaUrl is required for text type, or templateName is required for template type" }
 );
 
 const validateSendMessage = (data) => {

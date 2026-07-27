@@ -14,9 +14,12 @@ export const SocketProvider = ({ children }) => {
       const socketUrl = rawUrl.replace(/\/+$/, "").replace(/\/api\/v1$/, "");
 
       s = io(socketUrl, {
-        transports: ["polling", "websocket"],
-        reconnectionAttempts: 3,
-        timeout: 5000,
+        transports: ["websocket", "polling"],
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000,
       });
 
       s.on("connect", () => {

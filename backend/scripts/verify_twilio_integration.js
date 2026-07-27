@@ -1,6 +1,6 @@
 require("dotenv").config();
-const { validateAndFormatE164 } = require("../utils/phone");
-const whatsappService = require("../services/whatsappService");
+const { validateAndFormatE164 } = require("../src/utils/phone");
+const whatsappService = require("../src/services/twilioService");
 const assert = require("assert");
 
 const runTests = async () => {
