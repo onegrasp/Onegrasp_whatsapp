@@ -77,6 +77,51 @@ const getTemplateType = (buttons, currentType) => {
   return "text";
 };
 
+const renderFormattedWhatsAppBody = (bodyText, sampleMap) => {
+  if (!bodyText) return <span className="text-slate-400 italic">Start drafting your template message...</span>;
+
+  let processed = bodyText.replace(/\{\{([^}]+)\}\}/g, (match, varName) => {
+    const cleanVar = varName.trim();
+    if (sampleMap && sampleMap[cleanVar] && sampleMap[cleanVar] !== `[${cleanVar}]`) {
+      return sampleMap[cleanVar];
+    }
+    if (cleanVar === "name" || cleanVar === "contact_name") return "John Doe";
+    if (cleanVar === "phone" || cleanVar === "contact_phone") return "+919876543210";
+    if (cleanVar === "1") return "John";
+    if (cleanVar === "2") return "20%";
+    if (cleanVar === "3") return "SPECIAL20";
+    if (cleanVar === "date") return "2026-07-27";
+    if (cleanVar === "time") return "10:30 AM";
+    if (cleanVar === "venue") return "Grand Auditorium";
+    if (cleanVar === "company") return "OneGrasp";
+    if (cleanVar === "code") return "PROMO2026";
+    if (cleanVar === "url") return "https://onegrasp.com";
+    return `[${cleanVar}]`;
+  });
+
+  const lines = processed.split("\n");
+  return lines.map((line, lineIdx) => {
+    const words = line.split(" ");
+    const lineElements = words.map((word, wordIdx) => {
+      if (word.startsWith("http://") || word.startsWith("https://") || word.startsWith("www.")) {
+        return (
+          <span key={wordIdx} className="text-[#027eb5] font-medium underline cursor-pointer hover:opacity-80">
+            {word}{" "}
+          </span>
+        );
+      }
+      return word + " ";
+    });
+
+    return (
+      <span key={lineIdx}>
+        {lineElements}
+        {lineIdx < lines.length - 1 && <br />}
+      </span>
+    );
+  });
+};
+
 export default function Templates() {
   const [templates, setTemplates] = useState([]);
   const [search, setSearch] = useState("");
@@ -1114,92 +1159,103 @@ export default function Templates() {
                   </div>
                 )}
 
-                {/* Mock WhatsApp Screen - SCROLLABLE */}
-                <div className="flex-1 rounded-2xl bg-[#efeae2] border border-slate-200 shadow-inner relative overflow-hidden min-h-0 flex flex-col">
-                  {/* WhatsApp-style header */}
-                  <div className="bg-[#075e54] text-white px-4 py-2 flex items-center gap-2 shrink-0">
-                    <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold">
-                      OG
-                    </div>
-                    <div>
-                      <div className="text-[11px] font-semibold">OneGrasp</div>
-                      <div className="text-[9px] opacity-70">online</div>
+                {/* Mock WhatsApp Screen - HYPER-REALISTIC PHONE FRAME */}
+                <div className="flex-1 rounded-3xl bg-[#efeae2] border border-slate-300 shadow-xl relative overflow-hidden min-h-0 flex flex-col font-sans">
+                  {/* WhatsApp Business Header */}
+                  <div className="bg-[#008069] text-white px-3.5 py-2.5 flex items-center justify-between shrink-0 shadow-sm">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-xs font-extrabold text-white border border-white/30 shadow-xs">
+                        OG
+                      </div>
+                      <div>
+                        <div className="text-[12px] font-bold flex items-center gap-1 leading-tight">
+                          <span>OneGrasp</span>
+                          <span className="text-[9px] bg-emerald-400/30 text-emerald-100 rounded-full px-1 py-0.2 font-bold border border-emerald-300/40">✓</span>
+                        </div>
+                        <div className="text-[9.5px] text-emerald-100/90 font-medium">Official Business Account</div>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Messages area - SCROLLABLE */}
-                  <div className="flex-1 overflow-y-auto p-3 flex flex-col justify-end gap-2">
-                    {/* Media header preview with dynamic aspect ratio */}
-                    {templateType === "media" && (
-                      <div className="bg-white rounded-2xl rounded-tr-none max-w-[92%] shadow-sm border border-slate-100/50 self-end overflow-hidden w-full transition-all duration-200">
-                        {headerImageUrl ? (
-                          <div
-                            className="w-full bg-slate-900/5 flex items-center justify-center overflow-hidden transition-all duration-200 relative"
-                            style={{
-                              aspectRatio: imageMeta.ratio ? `${imageMeta.ratio}` : "16/9",
-                              maxHeight: "320px",
-                            }}
-                          >
-                            <img
-                              src={headerImageUrl}
-                              alt="Header Preview"
-                              className="w-full h-full object-contain rounded-t-2xl"
-                              style={{ aspectRatio: imageMeta.ratio ? `${imageMeta.ratio}` : "auto" }}
-                            />
-                            {imageMeta.label && (
-                              <span className="absolute bottom-1 right-1 bg-slate-900/70 text-white font-mono text-[9px] px-1.5 py-0.5 rounded backdrop-blur-xs select-none">
-                                {imageMeta.label}
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="bg-slate-100 h-32 flex items-center justify-center">
-                            <Image
-                              size={28}
-                              className="text-slate-300"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Mock WhatsApp Message Bubble */}
-                    <div className="bg-white rounded-2xl rounded-tr-none px-3.5 py-2.5 max-w-[92%] shadow-sm text-xs border border-slate-100/50 leading-relaxed text-slate-800 relative self-end">
-                      <p className="whitespace-pre-wrap font-medium break-words">
-                        {compiledPreview || "Start drafting your template..."}
-                      </p>
-                      <span className="text-[9px] text-slate-400 block text-right mt-1.5 select-none leading-none">
-                        {new Date().toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}{" "}
-                        ✓✓
-                      </span>
-                    </div>
-
-                    {/* Render buttons previews */}
-                    {buttons.length > 0 && (
-                      <div className="space-y-1 max-w-[92%] self-end w-full">
-                        {buttons.map((btn, index) => (
-                          <div
-                            key={index}
-                            className="bg-white border border-slate-100 rounded-xl py-2 px-3 text-center text-xs font-semibold text-sky-600 shadow-sm cursor-pointer hover:bg-slate-50/50 select-none flex items-center justify-center gap-1.5"
-                          >
-                            {btn.type === "URL" ? (
-                              <ExternalLink
-                                size={11}
-                                className="text-sky-400"
+                  {/* Messages Area */}
+                  <div className="flex-1 overflow-y-auto p-3 flex flex-col justify-end gap-2 bg-[#efeae2] bg-repeat" style={{ backgroundImage: "radial-gradient(#cbd5e1 0.75px, transparent 0.75px)", backgroundSize: "16px 16px" }}>
+                    
+                    {/* Unified WhatsApp Business Message Card Bubble */}
+                    <div className="bg-white rounded-2xl rounded-tr-xs shadow-md border border-slate-200/70 max-w-[96%] w-full self-end overflow-hidden flex flex-col transition-all duration-200">
+                      
+                      {/* 1. Header Media Image (if media template) */}
+                      {templateType === "media" && (
+                        <div className="w-full bg-slate-100 overflow-hidden relative border-b border-slate-100/80">
+                          {headerImageUrl ? (
+                            <div
+                              className="w-full bg-slate-900/5 flex items-center justify-center overflow-hidden relative"
+                              style={{
+                                aspectRatio: imageMeta.ratio ? `${imageMeta.ratio}` : "16/9",
+                                maxHeight: "300px",
+                              }}
+                            >
+                              <img
+                                src={headerImageUrl}
+                                alt="Header Preview"
+                                className="w-full h-full object-contain"
+                                style={{ aspectRatio: imageMeta.ratio ? `${imageMeta.ratio}` : "auto" }}
                               />
-                            ) : btn.type === "phone" ? (
-                              <Phone size={11} className="text-sky-400" />
-                            ) : (
-                              <Sparkles size={11} className="text-sky-400" />
-                            )}
-                            {btn.text}
-                          </div>
-                        ))}
+                              {imageMeta.label && (
+                                <span className="absolute bottom-1.5 right-1.5 bg-slate-900/80 text-white font-mono text-[9px] px-1.5 py-0.5 rounded backdrop-blur-xs select-none">
+                                  {imageMeta.label}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="bg-slate-100 h-36 flex flex-col items-center justify-center gap-1 text-slate-400">
+                              <Image size={32} className="text-slate-300" />
+                              <span className="text-[10px] font-medium text-slate-400">Header Media Image</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 2. Message Text Body */}
+                      <div className="p-3 space-y-2">
+                        <div className="text-[12.5px] leading-[1.45] text-slate-800 font-normal whitespace-pre-wrap break-words">
+                          {renderFormattedWhatsAppBody(body, sampleValues)}
+                        </div>
+
+                        {/* Timestamp & WhatsApp Double Checkmarks */}
+                        <div className="flex items-center justify-end gap-1 text-[9.5px] text-slate-400 select-none pt-0.5">
+                          <span>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                          <span className="text-[#53bdeb] font-bold text-[11px] leading-none">✓✓</span>
+                        </div>
                       </div>
-                    )}
+
+                      {/* 3. Action Buttons (Attached directly to bubble bottom) */}
+                      {buttons && buttons.length > 0 && (
+                        <div className="border-t border-slate-150 bg-white divide-y divide-slate-150">
+                          {buttons.map((btn, index) => (
+                            <div
+                              key={index}
+                              className="py-2.5 px-3 text-center text-[12px] font-semibold text-[#00a884] hover:bg-slate-50 transition-colors cursor-pointer select-none flex items-center justify-center gap-1.5 active:bg-slate-100"
+                            >
+                              {btn.type === "URL" ? (
+                                <ExternalLink size={12} className="text-[#00a884] shrink-0" />
+                              ) : btn.type === "phone" ? (
+                                <Phone size={12} className="text-[#00a884] shrink-0" />
+                              ) : (
+                                <Sparkles size={12} className="text-[#00a884] shrink-0" />
+                              )}
+                              <span>{btn.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Mock Chat Input Footer */}
+                  <div className="bg-[#f0f2f5] px-3 py-2 border-t border-slate-200 flex items-center gap-2 shrink-0">
+                    <div className="bg-white rounded-full flex-1 px-3 py-1.5 text-[11px] text-slate-400 border border-slate-200">
+                      Message...
+                    </div>
                   </div>
                 </div>
               </div>
