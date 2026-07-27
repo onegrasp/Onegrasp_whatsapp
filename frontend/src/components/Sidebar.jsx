@@ -9,6 +9,7 @@ import {
   Zap,
   FileText,
   ScrollText,
+  LogOut,
 } from "lucide-react";
 import { useSocket } from "../context/SocketContext";
 import { getConversations } from "../services/api";
@@ -49,7 +50,7 @@ const navItems = [
   { to: "/logs", icon: ScrollText, label: "Logs" },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ onLogout }) {
   const { connected, socket } = useSocket();
   const [unreadTotal, setUnreadTotal] = useState(0);
 
@@ -140,18 +141,29 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Connection Status */}
-      <div className="p-3 border-t border-surface-border">
-        <div className="flex items-center gap-2 px-2">
-          <div
-            className={`w-2 h-2 rounded-full ${
-              connected ? "bg-wa-green animate-pulse" : "bg-red-500"
-            }`}
-          />
-          <span className="hidden lg:block text-xs text-slate-500 font-medium">
-            {connected ? "Live" : "Offline"}
-          </span>
+      {/* Connection Status & Logout */}
+      <div className="p-3 border-t border-surface-border flex flex-col gap-2">
+        <div className="flex items-center justify-between px-2">
+          <div className="flex items-center gap-2">
+            <div
+              className={`w-2 h-2 rounded-full ${
+                connected ? "bg-wa-green animate-pulse" : "bg-red-500"
+              }`}
+            />
+            <span className="hidden lg:block text-xs text-slate-500 font-medium">
+              {connected ? "Live" : "Offline"}
+            </span>
+          </div>
         </div>
+
+        <button
+          onClick={onLogout}
+          title="Logout of session"
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+        >
+          <LogOut size={16} className="shrink-0 text-rose-500" />
+          <span className="hidden lg:block">Logout</span>
+        </button>
       </div>
     </aside>
   );

@@ -11,10 +11,10 @@ const api = axios.create({
   timeout: 30000,
 });
 
-// Attach JWT token to every request if it exists in local storage
+// Attach JWT token to every request if it exists in session or local storage
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("token");
+    const token = sessionStorage.getItem("token") || localStorage.getItem("token");
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -32,6 +32,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       const isAuthLogin = error.config?.url?.includes("/auth/login");
       if (!isAuthLogin) {
+        sessionStorage.removeItem("token");
         localStorage.removeItem("token");
         window.location.href = "/";
       }
@@ -55,6 +56,11 @@ api.interceptors.response.use(
 
 // Auth
 export const login = (password) => api.post("/auth/login", { password });
+export const logout = () => {
+  sessionStorage.removeItem("token");
+  localStorage.removeItem("token");
+  return api.post("/auth/logout").catch(() => {});
+};
 
 // Contacts
 export const uploadContacts = (formData) =>

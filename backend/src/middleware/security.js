@@ -28,10 +28,10 @@ const apiLimiter = rateLimit({
   },
 });
 
-// Strict limiter for auth login endpoint (anti-brute-force: max 10 attempts / 15 mins)
+// Strict limiter for auth login endpoint (anti-brute-force: max 5 attempts / 15 mins)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 5,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: getClientIp,
@@ -40,7 +40,7 @@ const authLimiter = rateLimit({
     success: false,
     error: {
       code: "rate_limit",
-      message: "Too many failed login attempts. Please try again after 15 minutes.",
+      message: "Too many failed login attempts. Account locked for this IP. Please try again after 15 minutes.",
     },
   },
 });

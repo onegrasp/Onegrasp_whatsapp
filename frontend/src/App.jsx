@@ -23,7 +23,8 @@ function Login({ onLoginSuccess }) {
     setError("");
     try {
       const res = await apiLogin(password);
-      localStorage.setItem("token", res.data.token);
+      // Store in sessionStorage so closing tab/browser terminates the session immediately
+      sessionStorage.setItem("token", res.data.token);
       onLoginSuccess(res.data.token);
     } catch (err) {
       const errData = err.response?.data?.error;
@@ -47,9 +48,9 @@ function Login({ onLoginSuccess }) {
           </div>
           <h2 className="text-xl font-bold text-slate-800 flex items-center justify-center gap-1.5">
             <Sparkles size={18} className="text-wa-green animate-pulse" />
-            WA Campaign Manager
+            OneGrasp Security Console
           </h2>
-          <p className="text-xs text-slate-400 mt-1 font-medium">Please authenticate to continue</p>
+          <p className="text-xs text-slate-400 mt-1 font-medium">Session authentication required</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5 relative">
@@ -92,7 +93,13 @@ function Login({ onLoginSuccess }) {
 }
 
 export default function App() {
-  const [token, setToken] = useState(() => localStorage.getItem("token"));
+  const [token, setToken] = useState(() => sessionStorage.getItem("token"));
+
+  const handleLogout = () => {
+    sessionStorage.removeItem("token");
+    localStorage.removeItem("token");
+    setToken(null);
+  };
 
   if (!token) {
     return <Login onLoginSuccess={setToken} />;
@@ -102,7 +109,7 @@ export default function App() {
     <SocketProvider>
       <BrowserRouter>
         <div className="flex h-screen overflow-hidden bg-[#F5FEF7]">
-          <Sidebar />
+          <Sidebar onLogout={handleLogout} />
           <main className="flex-1 overflow-hidden">
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
