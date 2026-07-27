@@ -96,6 +96,7 @@ export default function Templates() {
   const [sampleValues, setSampleValues] = useState({});
   const [headerImageUrl, setHeaderImageUrl] = useState("");
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [imageMeta, setImageMeta] = useState({ ratio: null, width: 0, height: 0, label: "" });
 
   const [showPlaceholderModal, setShowPlaceholderModal] = useState(false);
   const [placeholderSearch, setPlaceholderSearch] = useState("");
@@ -107,6 +108,35 @@ export default function Templates() {
   useEffect(() => {
     fetchTemplatesList();
   }, []);
+
+  // Automatic Image Aspect Ratio Detector
+  useEffect(() => {
+    if (!headerImageUrl) {
+      setImageMeta({ ratio: null, width: 0, height: 0, label: "" });
+      return;
+    }
+    const img = new window.Image();
+    img.onload = () => {
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      if (w && h) {
+        const ratio = w / h;
+        let label = `${w}x${h} px`;
+        if (Math.abs(ratio - 1) < 0.05) label += " • 1:1 Square";
+        else if (Math.abs(ratio - (16 / 9)) < 0.08) label += " • 16:9 Landscape";
+        else if (Math.abs(ratio - (4 / 5)) < 0.08) label += " • 4:5 Portrait";
+        else if (Math.abs(ratio - (9 / 16)) < 0.08) label += " • 9:16 Vertical";
+        else if (ratio > 1) label += ` • ${ratio.toFixed(2)}:1 Wide`;
+        else label += ` • 1:${(1 / ratio).toFixed(2)} Tall`;
+
+        setImageMeta({ ratio, width: w, height: h, label });
+      }
+    };
+    img.onerror = () => {
+      setImageMeta({ ratio: null, width: 0, height: 0, label: "" });
+    };
+    img.src = headerImageUrl;
+  }, [headerImageUrl]);
 
   useEffect(() => {
     const vars = extractVariables(body);
@@ -871,8 +901,14 @@ export default function Templates() {
                         </label>
                       )}
                     </div>
+                    {imageMeta.label && (
+                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/60 rounded-xl px-2.5 py-1 mt-1.5 animate-fade-in">
+                        <Sparkles size={11} className="text-emerald-600 shrink-0 animate-pulse" />
+                        <span>📐 Auto-Adjusted Aspect Ratio: {imageMeta.label}</span>
+                      </div>
+                    )}
                     <p className="text-[9px] text-slate-400">
-                      Provide a public URL or upload an image file (e.g. PNG, JPG).
+                      Provide a public URL or upload an image file (e.g. PNG, JPG). The template automatically fits to the exact ratio of your image.
                     </p>
                   </div>
                 )}
@@ -1093,15 +1129,29 @@ export default function Templates() {
 
                   {/* Messages area - SCROLLABLE */}
                   <div className="flex-1 overflow-y-auto p-3 flex flex-col justify-end gap-2">
-                    {/* Media header preview */}
+                    {/* Media header preview with dynamic aspect ratio */}
                     {templateType === "media" && (
-                      <div className="bg-white rounded-2xl rounded-tr-none max-w-[92%] shadow-sm border border-slate-100/50 self-end overflow-hidden w-full">
+                      <div className="bg-white rounded-2xl rounded-tr-none max-w-[92%] shadow-sm border border-slate-100/50 self-end overflow-hidden w-full transition-all duration-200">
                         {headerImageUrl ? (
-                          <img
-                            src={headerImageUrl}
-                            alt="Header Preview"
-                            className="w-full h-auto max-h-[380px] object-contain bg-slate-900/5 rounded-t-2xl"
-                          />
+                          <div
+                            className="w-full bg-slate-900/5 flex items-center justify-center overflow-hidden transition-all duration-200 relative"
+                            style={{
+                              aspectRatio: imageMeta.ratio ? `${imageMeta.ratio}` : "16/9",
+                              maxHeight: "320px",
+                            }}
+                          >
+                            <img
+                              src={headerImageUrl}
+                              alt="Header Preview"
+                              className="w-full h-full object-contain rounded-t-2xl"
+                              style={{ aspectRatio: imageMeta.ratio ? `${imageMeta.ratio}` : "auto" }}
+                            />
+                            {imageMeta.label && (
+                              <span className="absolute bottom-1 right-1 bg-slate-900/70 text-white font-mono text-[9px] px-1.5 py-0.5 rounded backdrop-blur-xs select-none">
+                                {imageMeta.label}
+                              </span>
+                            )}
+                          </div>
                         ) : (
                           <div className="bg-slate-100 h-32 flex items-center justify-center">
                             <Image
