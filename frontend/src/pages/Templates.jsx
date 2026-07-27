@@ -15,6 +15,10 @@ import {
   ExternalLink,
   Phone,
   Image,
+  Maximize2,
+  Smartphone,
+  Monitor,
+  ZoomIn,
 } from "lucide-react";
 import {
   getTemplates,
@@ -145,6 +149,10 @@ export default function Templates() {
 
   const [showPlaceholderModal, setShowPlaceholderModal] = useState(false);
   const [placeholderSearch, setPlaceholderSearch] = useState("");
+
+  const [showFullPreviewModal, setShowFullPreviewModal] = useState(false);
+  const [previewDeviceMode, setPreviewDeviceMode] = useState("mobile");
+  const [previewZoomImage, setPreviewZoomImage] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -1124,9 +1132,20 @@ export default function Templates() {
 
               {/* Right Column: Live WhatsApp Preview */}
               <div className="w-full md:w-[380px] bg-slate-50 p-4 flex flex-col min-h-0 shrink-0">
-                <h3 className="text-[11px] font-semibold text-slate-500 mb-3 uppercase tracking-wider select-none shrink-0">
-                  Live Preview Panel
-                </h3>
+                <div className="flex items-center justify-between mb-3 shrink-0">
+                  <h3 className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider select-none">
+                    Live Preview Panel
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowFullPreviewModal(true)}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2.5 py-1 rounded-xl flex items-center gap-1.5 shadow-sm transition-all active:scale-[0.98]"
+                    title="Open full screen 100% real WhatsApp chat preview"
+                  >
+                    <Maximize2 size={11} />
+                    Full Screen Chat
+                  </button>
+                </div>
 
                 {/* Variables Preview Editor */}
                 {variables.length > 0 && (
@@ -1175,6 +1194,14 @@ export default function Templates() {
                         <div className="text-[9.5px] text-emerald-100/90 font-medium">Official Business Account</div>
                       </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowFullPreviewModal(true)}
+                      className="p-1 hover:bg-white/10 rounded-lg text-emerald-100 transition-colors"
+                      title="Expand to Full Screen View"
+                    >
+                      <Maximize2 size={13} />
+                    </button>
                   </div>
 
                   {/* Messages Area */}
@@ -1185,26 +1212,23 @@ export default function Templates() {
                       
                       {/* 1. Header Media Image (if media template) */}
                       {templateType === "media" && (
-                        <div className="w-full bg-slate-100 overflow-hidden relative border-b border-slate-100/80">
+                        <div className="w-full bg-slate-100 overflow-hidden relative border-b border-slate-100/80 group">
                           {headerImageUrl ? (
                             <div
-                              className="w-full bg-slate-900/5 flex items-center justify-center overflow-hidden relative"
+                              className="w-full bg-slate-900/5 flex items-center justify-center overflow-hidden relative cursor-pointer"
+                              onClick={() => setShowFullPreviewModal(true)}
                               style={{
-                                aspectRatio: imageMeta.ratio ? `${imageMeta.ratio}` : "16/9",
-                                maxHeight: "300px",
+                                aspectRatio: imageMeta.ratio ? `${imageMeta.ratio}` : "auto",
                               }}
                             >
                               <img
                                 src={headerImageUrl}
                                 alt="Header Preview"
                                 className="w-full h-full object-contain"
-                                style={{ aspectRatio: imageMeta.ratio ? `${imageMeta.ratio}` : "auto" }}
                               />
-                              {imageMeta.label && (
-                                <span className="absolute bottom-1.5 right-1.5 bg-slate-900/80 text-white font-mono text-[9px] px-1.5 py-0.5 rounded backdrop-blur-xs select-none">
-                                  {imageMeta.label}
-                                </span>
-                              )}
+                              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[11px] font-semibold gap-1 backdrop-blur-[1px]">
+                                <Maximize2 size={13} /> Click for Full View
+                              </div>
                             </div>
                           ) : (
                             <div className="bg-slate-100 h-36 flex flex-col items-center justify-center gap-1 text-slate-400">
@@ -1347,6 +1371,265 @@ export default function Templates() {
                 Done
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 100% Real Full Screen WhatsApp Preview Modal */}
+      {showFullPreviewModal && (
+        <div className="fixed inset-0 z-[70] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-in fade-in zoom-in duration-200">
+          <div className="bg-slate-900 text-white rounded-3xl w-full max-w-4xl max-h-[94vh] flex flex-col shadow-2xl border border-slate-800 overflow-hidden">
+            {/* Modal Top Bar */}
+            <div className="px-6 py-3.5 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-900/90 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">
+                  <Smartphone size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    Real WhatsApp Chat Preview
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-mono px-2 py-0.5 rounded-full border border-emerald-500/30">
+                      100% High-Res
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">See exactly how your customer receives this message image & text</p>
+                </div>
+              </div>
+
+              {/* View mode switcher */}
+              <div className="flex items-center gap-3">
+                <div className="bg-slate-800 p-1 rounded-xl flex items-center gap-1 border border-slate-700">
+                  <button
+                    onClick={() => setPreviewDeviceMode("mobile")}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                      previewDeviceMode === "mobile"
+                        ? "bg-wa-green text-white shadow-sm"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    <Smartphone size={13} />
+                    Mobile
+                  </button>
+                  <button
+                    onClick={() => setPreviewDeviceMode("desktop")}
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                      previewDeviceMode === "desktop"
+                        ? "bg-wa-green text-white shadow-sm"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    <Monitor size={13} />
+                    WhatsApp Web
+                  </button>
+                </div>
+
+                {headerImageUrl && (
+                  <button
+                    onClick={() => setPreviewZoomImage(true)}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all"
+                    title="Inspect raw full resolution image"
+                  >
+                    <ZoomIn size={13} className="text-emerald-400" />
+                    Inspect Image
+                  </button>
+                )}
+
+                <button
+                  onClick={() => setShowFullPreviewModal(false)}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Screen Body */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#0b141a] flex items-center justify-center min-h-0">
+              {previewDeviceMode === "mobile" ? (
+                <div className="w-full max-w-[440px] rounded-3xl bg-[#efeae2] border border-slate-700 shadow-2xl overflow-hidden flex flex-col my-auto transition-all">
+                  <div className="bg-[#008069] text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-md">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center text-xs font-extrabold text-white border border-white/30 shadow-xs">
+                        OG
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold flex items-center gap-1.5 leading-tight">
+                          <span>OneGrasp</span>
+                          <span className="text-[10px] bg-emerald-400/30 text-emerald-100 rounded-full px-1.5 py-0.2 font-bold border border-emerald-300/40">✓</span>
+                        </div>
+                        <div className="text-[10px] text-emerald-100/90 font-medium">Official Business Account</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 flex flex-col justify-end gap-3 bg-[#efeae2] bg-repeat min-h-[440px]" style={{ backgroundImage: "radial-gradient(#cbd5e1 0.8px, transparent 0.8px)", backgroundSize: "18px 18px" }}>
+                    <div className="bg-white rounded-2xl rounded-tr-xs shadow-lg border border-slate-200 max-w-[96%] w-full self-end overflow-hidden flex flex-col">
+                      {templateType === "media" && (
+                        <div className="w-full bg-slate-900/5 border-b border-slate-100 relative group">
+                          {headerImageUrl ? (
+                            <div
+                              className="w-full flex items-center justify-center overflow-hidden relative cursor-pointer"
+                              onClick={() => setPreviewZoomImage(true)}
+                              style={{
+                                aspectRatio: imageMeta.ratio ? `${imageMeta.ratio}` : "auto",
+                              }}
+                            >
+                              <img
+                                src={headerImageUrl}
+                                alt="Full Resolution Header"
+                                className="w-full h-full object-contain"
+                              />
+                              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-semibold gap-1.5 backdrop-blur-[1px]">
+                                <ZoomIn size={16} /> Click to Inspect Full Image
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="bg-slate-100 h-44 flex flex-col items-center justify-center gap-1 text-slate-400">
+                              <Image size={36} className="text-slate-300" />
+                              <span className="text-xs font-medium text-slate-400">Header Media Image</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="p-4 space-y-2.5">
+                        <div className="text-[13.5px] leading-relaxed text-slate-800 font-normal whitespace-pre-wrap break-words">
+                          {renderFormattedWhatsAppBody(body, sampleValues)}
+                        </div>
+
+                        <div className="flex items-center justify-end gap-1 text-[10px] text-slate-400 select-none pt-1">
+                          <span>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                          <span className="text-[#53bdeb] font-bold text-[12px] leading-none">✓✓</span>
+                        </div>
+                      </div>
+
+                      {buttons && buttons.length > 0 && (
+                        <div className="border-t border-slate-150 bg-white divide-y divide-slate-150">
+                          {buttons.map((btn, index) => (
+                            <div
+                              key={index}
+                              className="py-3 px-4 text-center text-xs font-semibold text-[#00a884] hover:bg-slate-50 transition-colors cursor-pointer select-none flex items-center justify-center gap-2 active:bg-slate-100"
+                            >
+                              {btn.type === "URL" ? (
+                                <ExternalLink size={14} className="text-[#00a884] shrink-0" />
+                              ) : btn.type === "phone" ? (
+                                <Phone size={14} className="text-[#00a884] shrink-0" />
+                              ) : (
+                                <Sparkles size={14} className="text-[#00a884] shrink-0" />
+                              )}
+                              <span>{btn.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-[#f0f2f5] px-4 py-3 border-t border-slate-300 flex items-center gap-3 shrink-0">
+                    <div className="bg-white rounded-full flex-1 px-4 py-2 text-xs text-slate-400 border border-slate-200">
+                      Message...
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full max-w-3xl rounded-2xl bg-[#efeae2] border border-slate-800 shadow-2xl overflow-hidden flex flex-col my-auto transition-all min-h-[520px]">
+                  <div className="bg-[#f0f2f5] text-slate-800 px-5 py-3 flex items-center justify-between border-b border-slate-300 shrink-0">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-wa-green/20 text-wa-green font-bold flex items-center justify-center text-sm">
+                        OG
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                          OneGrasp Official
+                          <span className="text-xs text-wa-green font-bold">✓</span>
+                        </h4>
+                        <span className="text-xs text-slate-500">Official WhatsApp Business Account</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-6 flex-1 flex flex-col justify-end bg-[#efeae2] bg-repeat min-h-[440px]" style={{ backgroundImage: "radial-gradient(#cbd5e1 0.8px, transparent 0.8px)", backgroundSize: "18px 18px" }}>
+                    <div className="bg-white rounded-2xl rounded-tr-xs shadow-xl border border-slate-200 max-w-[560px] w-full self-end overflow-hidden flex flex-col">
+                      {templateType === "media" && (
+                        <div className="w-full bg-slate-900/5 border-b border-slate-100 relative group">
+                          {headerImageUrl ? (
+                            <div
+                              className="w-full flex items-center justify-center overflow-hidden relative cursor-pointer"
+                              onClick={() => setPreviewZoomImage(true)}
+                              style={{
+                                aspectRatio: imageMeta.ratio ? `${imageMeta.ratio}` : "auto",
+                              }}
+                            >
+                              <img
+                                src={headerImageUrl}
+                                alt="Full Resolution Header"
+                                className="w-full h-full object-contain"
+                              />
+                            </div>
+                          ) : (
+                            <div className="bg-slate-100 h-48 flex flex-col items-center justify-center gap-1 text-slate-400">
+                              <Image size={40} className="text-slate-300" />
+                              <span className="text-xs font-medium text-slate-400">Header Media Image</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="p-5 space-y-3">
+                        <div className="text-sm leading-relaxed text-slate-800 font-normal whitespace-pre-wrap break-words">
+                          {renderFormattedWhatsAppBody(body, sampleValues)}
+                        </div>
+
+                        <div className="flex items-center justify-end gap-1 text-xs text-slate-400 select-none pt-1">
+                          <span>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                          <span className="text-[#53bdeb] font-bold text-sm leading-none">✓✓</span>
+                        </div>
+                      </div>
+
+                      {buttons && buttons.length > 0 && (
+                        <div className="border-t border-slate-150 bg-white divide-y divide-slate-150">
+                          {buttons.map((btn, index) => (
+                            <div
+                              key={index}
+                              className="py-3 px-4 text-center text-xs font-semibold text-[#00a884] hover:bg-slate-50 transition-colors cursor-pointer select-none flex items-center justify-center gap-2 active:bg-slate-100"
+                            >
+                              {btn.type === "URL" ? (
+                                <ExternalLink size={14} className="text-[#00a884] shrink-0" />
+                              ) : btn.type === "phone" ? (
+                                <Phone size={14} className="text-[#00a884] shrink-0" />
+                              ) : (
+                                <Sparkles size={14} className="text-[#00a884] shrink-0" />
+                              )}
+                              <span>{btn.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Raw Image Zoom Lightbox Modal */}
+      {previewZoomImage && headerImageUrl && (
+        <div className="fixed inset-0 z-[80] bg-black/95 backdrop-blur-lg flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <button
+            onClick={() => setPreviewZoomImage(false)}
+            className="absolute top-5 right-5 text-white bg-white/10 hover:bg-white/20 p-2.5 rounded-full transition-colors z-10"
+            title="Close Full Image View"
+          >
+            <X size={24} />
+          </button>
+          <div className="max-w-5xl max-h-[90vh] overflow-auto flex items-center justify-center">
+            <img
+              src={headerImageUrl}
+              alt="Raw High Resolution Header"
+              className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl border border-white/10"
+            />
           </div>
         </div>
       )}
