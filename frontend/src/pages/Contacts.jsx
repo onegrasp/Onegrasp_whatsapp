@@ -298,6 +298,24 @@ export default function Contacts() {
             />
           </div>
 
+          {/* Sample CSV Template Download */}
+          <button
+            onClick={() => {
+              const csvContent = "data:text/csv;charset=utf-8,phone,name,label\n+919876543210,John Doe,interested\n+14155238886,Jane Smith,follow_up\n";
+              const encodedUri = encodeURI(csvContent);
+              const link = document.createElement("a");
+              link.setAttribute("href", encodedUri);
+              link.setAttribute("download", "sample_contacts_template.csv");
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }}
+            className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 shadow-sm transition-all"
+            title="Download sample CSV template"
+          >
+            📥 Sample CSV
+          </button>
+
           {/* Add Single Contact Button */}
           <button
             onClick={() => setShowSingleModal(true)}

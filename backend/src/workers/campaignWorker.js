@@ -7,31 +7,30 @@ const logger = require("../utils/logger");
 
 const process = async (job) => {
   const contact = await contactRepository.findByPhone(job.phone);
-  const contactName = contact?.name || job.phone;
+  const contactName = contact?.name && contact.name !== job.phone ? contact.name : "Valued Customer";
 
-  // 1. Personalize text message if placeholders like {{name}} or {{phone}} are present
+  // 1. Personalize text message if placeholders like {{name}}, {{contact_name}}, {{1}}, etc. are present
   let personalizedMessage = job.message || "";
   if (personalizedMessage) {
     personalizedMessage = personalizedMessage
-      .replace(/\{\{name\}\}/gi, contactName)
-      .replace(/\{\{contact_name\}\}/gi, contactName)
-      .replace(/\{\{phone\}\}/gi, job.phone)
-      .replace(/\{\{contact_phone\}\}/gi, job.phone);
+      .replace(/\{\{(name|contact_name|customer_name|recipient_name|1)\}\}/gi, contactName)
+      .replace(/\{\{(phone|contact_phone|mobile|number)\}\}/gi, job.phone);
   }
 
-  // 2. Personalize template params array if placeholders like {{contact_name}} or {{name}} are passed
+  // 2. Personalize template params array if placeholders or empty values are passed
   let personalizedParams = [];
   if (job.params && Array.isArray(job.params)) {
-    personalizedParams = job.params.map((p) => {
+    personalizedParams = job.params.map((p, idx) => {
       if (typeof p === "string") {
-        if (p === "{{contact_name}}" || p.toLowerCase() === "{{name}}") {
+        const cleanP = p.trim().toLowerCase();
+        if (!cleanP || cleanP === "{{contact_name}}" || cleanP === "{{name}}" || cleanP === "{{1}}" || cleanP === "{{customer_name}}") {
           return contactName;
         }
-        if (p === "{{contact_phone}}" || p.toLowerCase() === "{{phone}}") {
+        if (cleanP === "{{contact_phone}}" || cleanP === "{{phone}}") {
           return job.phone;
         }
       }
-      return p;
+      return p || contactName;
     });
   }
 

@@ -24,6 +24,12 @@ const registerHandlers = () => {
           contact = await contactRepository.findByPhone(from);
           if (!contact) throw err;
         }
+      } else if (profileName && (contact.name === from || contact.name === "Unknown" || contact.name === "Customer" || !contact.name)) {
+        try {
+          contact = await contactRepository.upsert(from, profileName, contact.label || "none");
+        } catch (err) {
+          // Ignore name update error
+        }
       }
 
       const msgTime = new Date().toISOString();

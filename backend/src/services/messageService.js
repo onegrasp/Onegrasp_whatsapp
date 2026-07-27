@@ -78,16 +78,14 @@ const messageService = {
     }
 
     const contact = await contactRepository.findByPhone(formatted);
-    const contactName = contact?.name || formatted;
+    const contactName = contact?.name && contact.name !== formatted ? contact.name : "Valued Customer";
 
     // Personalize message text with contact placeholders
     let personalizedMessage = message || "";
     if (personalizedMessage) {
       personalizedMessage = personalizedMessage
-        .replace(/\{\{name\}\}/gi, contactName)
-        .replace(/\{\{contact_name\}\}/gi, contactName)
-        .replace(/\{\{phone\}\}/gi, formatted)
-        .replace(/\{\{contact_phone\}\}/gi, formatted);
+        .replace(/\{\{(name|contact_name|customer_name|recipient_name|1)\}\}/gi, contactName)
+        .replace(/\{\{(phone|contact_phone|mobile|number)\}\}/gi, formatted);
     }
 
     // Personalize template params
@@ -95,14 +93,15 @@ const messageService = {
     if (params && Array.isArray(params)) {
       personalizedParams = params.map((p) => {
         if (typeof p === "string") {
-          if (p === "{{contact_name}}" || p.toLowerCase() === "{{name}}") {
+          const cleanP = p.trim().toLowerCase();
+          if (!cleanP || cleanP === "{{contact_name}}" || cleanP === "{{name}}" || cleanP === "{{1}}" || cleanP === "{{customer_name}}") {
             return contactName;
           }
-          if (p === "{{contact_phone}}" || p.toLowerCase() === "{{phone}}") {
+          if (cleanP === "{{contact_phone}}" || cleanP === "{{phone}}") {
             return formatted;
           }
         }
-        return p;
+        return p || contactName;
       });
     }
 

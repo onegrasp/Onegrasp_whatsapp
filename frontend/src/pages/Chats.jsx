@@ -563,6 +563,20 @@ export default function Chats() {
                 </button>
               </div>
             )}
+            <div className="flex items-center justify-between gap-2 mb-1.5 px-1">
+              <span className="text-[10px] text-slate-400 font-medium">Quick Personalization:</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setMsgInput((prev) => prev + " {{name}}")}
+                  className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60 rounded-md px-2 py-0.5 hover:bg-emerald-100 transition-all"
+                  title="Insert recipient's dynamic contact name"
+                >
+                  + {"{{name}}"}
+                </button>
+              </div>
+            </div>
+
             <div className="flex items-end gap-3 w-full">
               <button
                 type="button"
