@@ -170,20 +170,7 @@ const messagingService = {
       if (options.contentSid) {
         logger.warn(`Content SID ${options.contentSid} dispatch failed: ${err.message}. Retrying with template body fallback...`);
         try {
-          let fallbackBody = templateName;
-          try {
-            const templateRepo = require("../../repositories/templateRepository");
-            let tpl = await templateRepo.findByContentSid(options.contentSid);
-            if (!tpl) tpl = await templateRepo.findByName(templateName);
-            if (tpl && tpl.body) {
-              fallbackBody = tpl.body;
-            }
-          } catch (e) {}
-
-          const paramArray = Array.isArray(params) ? params : [];
-          paramArray.forEach((p, index) => {
-            fallbackBody = fallbackBody.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, "g"), p).replace(new RegExp(`\\{\\{name\\}\\}`, "g"), p);
-          });
+          const fallbackBody = await resolveTemplateText(templateName, params, "Hello Valued Customer");
 
           const fallbackOptions = {
             to: options.to,
