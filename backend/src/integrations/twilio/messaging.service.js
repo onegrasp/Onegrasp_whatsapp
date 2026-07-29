@@ -74,23 +74,65 @@ const messagingService = {
       options.from = config.fromPhone;
     }
 
-    if (templateName.startsWith("HX")) {
-      options.contentSid = templateName;
-      if (params.length > 0) {
-        const variables = {};
-        params.forEach((p, index) => {
-          variables[String(index + 1)] = p;
-        });
-        options.contentVariables = JSON.stringify(variables);
+    let resolvedContentSid = null;
+
+    if (typeof templateName === "string" && templateName.startsWith("HX")) {
+      resolvedContentSid = templateName;
+    } else if (templateName) {
+      try {
+        const templateRepo = require("../../repositories/templateRepository");
+        let tpl = await templateRepo.findByName(templateName);
+        if (!tpl) tpl = await templateRepo.findById(templateName);
+        if (!tpl) tpl = await templateRepo.findByContentSid(templateName);
+
+        if (tpl && tpl.content_sid && tpl.content_sid.startsWith("HX")) {
+          resolvedContentSid = tpl.content_sid;
+        } else {
+          // Query Twilio Content API to auto-resolve approved template SID by friendlyName
+          const list = await client.content.v1.contents.list({ limit: 100 });
+          const match = (list || []).find((t) =>
+            t.sid === templateName ||
+            t.friendlyName === templateName ||
+            t.friendlyName === (tpl?.name || "")
+          );
+          if (match && match.sid) {
+            resolvedContentSid = match.sid;
+            if (tpl) {
+              await templateRepo.update(tpl.id, { content_sid: match.sid, status: "approved" }).catch(() => {});
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn("Could not lookup Content SID for templateName:", { templateName, error: err });
+      }
+    }
+
+    if (resolvedContentSid) {
+      options.contentSid = resolvedContentSid;
+      if (params) {
+        let variables = {};
+        if (Array.isArray(params) && params.length > 0) {
+          params.forEach((p, index) => {
+            variables[String(index + 1)] = String(p);
+          });
+        } else if (typeof params === "object" && params !== null) {
+          variables = params;
+        }
+        if (Object.keys(variables).length > 0) {
+          options.contentVariables = JSON.stringify(variables);
+        }
       }
       if (mediaUrl) {
         options.mediaUrl = [mediaUrl];
       }
     } else {
+      // Fallback: If template is a simple text template or no HX SID is registered yet
       let body = templateName;
-      params.forEach((p, index) => {
-        body = body.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, "g"), p);
-      });
+      if (Array.isArray(params)) {
+        params.forEach((p, index) => {
+          body = body.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, "g"), p);
+        });
+      }
       options.body = body;
       if (mediaUrl) {
         options.mediaUrl = [mediaUrl];

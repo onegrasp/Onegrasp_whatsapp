@@ -450,7 +450,7 @@ export default function BulkSender() {
                     onChange={(e) => {
                       const val = e.target.value;
                       setSelectedTemplate(val);
-                      const tpl = templates.find(t => (t._id || t.id) === val);
+                      const tpl = templates.find(t => t.content_sid === val || t.name === val || (t._id || t.id) === val);
                       if (tpl && (tpl.header_image_url || tpl.headerImageUrl)) {
                         setCampaignMediaUrl(tpl.header_image_url || tpl.headerImageUrl);
                       }
@@ -461,10 +461,10 @@ export default function BulkSender() {
                     {templates.map((t) => (
                       <option 
                         key={t._id || t.id} 
-                        value={t._id || t.id} 
+                        value={t.content_sid || t.name || (t._id || t.id)} 
                         disabled={t.status?.toLowerCase() === "rejected"}
                       >
-                        {t.name} ({t.status || "draft"}) {t.type === "media" || t.header_image_url ? "📷" : ""}
+                        {t.name} ({t.status || "draft"}) {t.content_sid ? `[${t.content_sid.slice(0, 8)}...]` : ""} {t.type === "media" || t.header_image_url ? "📷" : ""}
                       </option>
                     ))}
                   </select>
@@ -486,7 +486,7 @@ export default function BulkSender() {
 
               {/* Dynamic Variable Input Fields */}
               {(() => {
-                const tpl = templates.find(t => (t._id || t.id) === selectedTemplate);
+                const tpl = templates.find(t => t.content_sid === selectedTemplate || t.name === selectedTemplate || (t._id || t.id) === selectedTemplate);
                 if (!tpl) return null;
                 const vars = getTemplateVariables(tpl);
                 const isMediaTpl = tpl.type === "media" || !!tpl.header_image_url;
