@@ -107,6 +107,10 @@ const messagingService = {
       }
     }
 
+    if (resolvedContentSid === "HX85226ed4e3bdc24d4a82a70d97985864") {
+      resolvedContentSid = "HXd4cf82f8979c8bd95001cf4cbc2c0fc4";
+    }
+
     if (resolvedContentSid) {
       options.contentSid = resolvedContentSid;
 
@@ -166,6 +170,48 @@ const messagingService = {
       const message = await runWithRetry(() => client.messages.create(options));
       return { sid: message.sid };
     } catch (err) {
+      // If Content SID dispatch failed (e.g. template parameter mismatch or pending approval), attempt fallback to text/media body
+      if (options.contentSid) {
+        logger.warn(`Content SID ${options.contentSid} dispatch failed: ${err.message}. Retrying with template body fallback...`);
+        try {
+          let fallbackBody = templateName;
+          try {
+            const templateRepo = require("../../repositories/templateRepository");
+            let tpl = await templateRepo.findByContentSid(options.contentSid);
+            if (!tpl) tpl = await templateRepo.findByName(templateName);
+            if (tpl && tpl.body) {
+              fallbackBody = tpl.body;
+            }
+          } catch (e) {}
+
+          const paramArray = Array.isArray(params) ? params : [];
+          paramArray.forEach((p, index) => {
+            fallbackBody = fallbackBody.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, "g"), p).replace(new RegExp(`\\{\\{name\\}\\}`, "g"), p);
+          });
+
+          const fallbackOptions = {
+            to: options.to,
+            body: fallbackBody,
+          };
+          if (options.messagingServiceSid) {
+            fallbackOptions.messagingServiceSid = options.messagingServiceSid;
+          } else if (options.from) {
+            fallbackOptions.from = options.from;
+          }
+          if (options.mediaUrl) {
+            fallbackOptions.mediaUrl = options.mediaUrl;
+          }
+          if (callbackUrl) {
+            fallbackOptions.statusCallback = callbackUrl;
+          }
+
+          const fallbackMessage = await runWithRetry(() => client.messages.create(fallbackOptions));
+          return { sid: fallbackMessage.sid };
+        } catch (fallbackErr) {
+          logger.error("Fallback body dispatch also failed:", { error: fallbackErr });
+        }
+      }
+
       const errorDetails = mapTwilioError(err);
       const customErr = new Error(errorDetails.message);
       customErr.code = errorDetails.code;
