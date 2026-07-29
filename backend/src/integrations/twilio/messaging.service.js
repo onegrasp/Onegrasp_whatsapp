@@ -111,19 +111,48 @@ const messagingService = {
       options.contentSid = resolvedContentSid;
       if (params) {
         let variables = {};
+
+        // Fetch template from repository to inspect variable names registered with Meta/Twilio
+        let tplVarNames = [];
+        try {
+          const templateRepo = require("../../repositories/templateRepository");
+          let tpl = await templateRepo.findByContentSid(resolvedContentSid);
+          if (!tpl) tpl = await templateRepo.findByName(templateName);
+          if (tpl && Array.isArray(tpl.variables) && tpl.variables.length > 0) {
+            tplVarNames = tpl.variables;
+          }
+        } catch (e) {}
+
         if (Array.isArray(params) && params.length > 0) {
           params.forEach((p, index) => {
-            variables[String(index + 1)] = String(p);
+            const val = String(p);
+            // 1. Assign numeric key ("1", "2", etc.)
+            variables[String(index + 1)] = val;
+            
+            // 2. Assign registered variable name if available
+            if (tplVarNames[index]) {
+              variables[String(tplVarNames[index])] = val;
+            } else {
+              // 3. Fallback common variable keys
+              variables["name"] = val;
+              variables["customer_name"] = val;
+            }
           });
         } else if (typeof params === "object" && params !== null) {
-          variables = params;
+          Object.keys(params).forEach((k, idx) => {
+            const val = String(params[k]);
+            variables[k] = val;
+            variables[String(idx + 1)] = val;
+          });
         }
+
         if (Object.keys(variables).length > 0) {
           options.contentVariables = JSON.stringify(variables);
         }
       }
-      if (mediaUrl) {
-        options.mediaUrl = [mediaUrl];
+
+      if (mediaUrl && typeof mediaUrl === "string" && mediaUrl.trim() && mediaUrl.trim().startsWith("http")) {
+        options.mediaUrl = [mediaUrl.trim()];
       }
     } else {
       // Fallback: If template is a simple text template or no HX SID is registered yet
