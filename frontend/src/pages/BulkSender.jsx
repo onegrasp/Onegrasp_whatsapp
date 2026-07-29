@@ -202,7 +202,7 @@ export default function BulkSender() {
 
     if (msgType === "template") {
       if (!selectedTemplate) return setError("Select a template");
-      const tpl = templates.find(t => (t._id || t.id) === selectedTemplate);
+      const tpl = templates.find(t => t.content_sid === selectedTemplate || t.name === selectedTemplate || (t._id || t.id) === selectedTemplate);
       if (tpl) {
         templateNameToSend = tpl.content_sid || tpl.contentSid || tpl.name;
         const vars = getTemplateVariables(tpl);
