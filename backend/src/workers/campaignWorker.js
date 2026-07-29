@@ -5,6 +5,8 @@ const contactRepository = require("../repositories/contactRepository");
 const { getIo } = require("../socket");
 const logger = require("../utils/logger");
 
+const { resolveTemplateText } = require("../utils/templateHelper");
+
 const process = async (job) => {
   const contact = await contactRepository.findByPhone(job.phone);
   const contactName = contact?.name && contact.name !== job.phone ? contact.name : "Valued Customer";
@@ -34,6 +36,11 @@ const process = async (job) => {
     });
   }
 
+  let templateDisplayText = personalizedMessage;
+  if (!templateDisplayText || templateDisplayText.startsWith("HX") || templateDisplayText.startsWith("[Template:")) {
+    templateDisplayText = await resolveTemplateText(job.template_name, personalizedParams, `Hello ${contactName}`);
+  }
+
   try {
     let result;
     if (job.type === "template") {
@@ -49,7 +56,7 @@ const process = async (job) => {
     const savedMsg = await messageRepository.create({
       phone: job.phone,
       contact_name: contactName,
-      text: personalizedMessage || `[Template: ${job.template_name}]`,
+      text: templateDisplayText,
       type: job.type === "template" ? "template" : "text",
       direction: "outgoing",
       status: "sent",

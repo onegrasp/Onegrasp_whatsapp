@@ -258,20 +258,28 @@ const sendSingle = async (req, res) => {
       result = await whatsappService.sendTextMessage(formatted, message, mediaUrl);
     }
 
-    const messageSid = result?.messages?.[0]?.id || "";
+    const { resolveTemplateText } = require("../utils/templateHelper");
     const { data: contact } = await supabase
       .from("contacts")
       .select("name")
       .eq("phone", formatted)
       .maybeSingle();
 
+    const contactName = contact?.name || "Customer";
+    let templateDisplayText = message;
+    if (type === "template" || !templateDisplayText || templateDisplayText.startsWith("HX") || templateDisplayText.startsWith("[Template:")) {
+      templateDisplayText = await resolveTemplateText(templateName, params, message || `Hello ${contactName}`);
+    }
+
+    const messageSid = result?.messages?.[0]?.id || "";
+
     const { data: savedMsg, error: insertError } = await supabase
       .from("messages")
       .insert([
         {
           phone: formatted,
-          contact_name: contact?.name || "",
-          text: message || `[Template: ${templateName}]`,
+          contact_name: contactName,
+          text: templateDisplayText,
           type,
           direction: "outgoing",
           status: "sent",
