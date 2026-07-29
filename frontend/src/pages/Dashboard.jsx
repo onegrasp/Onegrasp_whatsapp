@@ -46,10 +46,13 @@ export default function Dashboard() {
     load();
   }, []);
 
-  const deliveryRate =
-    stats?.totalMessages > 0
-      ? Math.round(((stats.deliveredMessages + stats.readMessages) / Math.max(stats.totalMessages, 1)) * 100)
-      : 0;
+  const totalOutgoing = (stats?.sentMessages || 0) + (stats?.deliveredMessages || 0) + (stats?.failedMessages || 0);
+  const effectiveDelivered = (stats?.deliveredMessages || 0) > 0
+    ? (stats.deliveredMessages || 0)
+    : Math.max(0, (stats?.sentMessages || 0) - (stats?.failedMessages || 0));
+  const deliveryRate = totalOutgoing > 0
+    ? Math.min(100, Math.max(0, Math.round((effectiveDelivered / totalOutgoing) * 100)))
+    : 0;
 
   return (
     <div className="h-full overflow-y-auto p-6">

@@ -137,10 +137,19 @@ export default function Campaigns() {
         <div className="grid gap-4">
           {campaigns.map((c) => {
             const isExpanded = expandedCampaignId === c._id;
-            const totalSuccessful = (c.deliveredCount || 0) + (c.readCount || 0);
-            const deliveryRate = c.sentCount > 0
-              ? Math.round((totalSuccessful / c.sentCount) * 100)
+            const sent = c.sentCount || 0;
+            const failed = c.failedCount || 0;
+            const delivered = c.deliveredCount || 0;
+            const total = c.totalContacts || (sent + failed) || 1;
+
+            const effectiveDelivered = delivered > 0 ? delivered : Math.max(0, sent - failed);
+            const deliveryRate = total > 0
+              ? Math.min(100, Math.max(0, Math.round((effectiveDelivered / total) * 100)))
               : 0;
+
+            const deliveredDisplay = delivered > 0 
+              ? delivered 
+              : (sent > 0 && failed === 0 ? `${sent} (Sent)` : 0);
 
             return (
               <div key={c._id} className="card p-5 bg-white shadow-sm rounded-2xl border border-slate-100 flex flex-col gap-4">
@@ -172,9 +181,9 @@ export default function Campaigns() {
                   {[
                     { icon: TrendingUp, label: "Total Recipient", value: c.totalContacts, color: "text-slate-500" },
                     { icon: TrendingUp, label: "Sent", value: c.sentCount, color: "text-blue-500" },
-                    { icon: CheckCheck, label: "Delivered", value: c.deliveredCount, color: "text-wa-green" },
-                    { icon: Eye, label: "Read", value: c.readCount, color: "text-cyan-500" },
-                    { icon: XCircle, label: "Failed", value: c.failedCount, color: "text-red-500" },
+                    { icon: CheckCheck, label: "Delivered", value: deliveredDisplay, color: "text-wa-green" },
+                    { icon: Eye, label: "Read", value: c.readCount || 0, color: "text-cyan-500" },
+                    { icon: XCircle, label: "Failed", value: c.failedCount || 0, color: "text-red-500" },
                   ].map(({ label, value, color }) => (
                     <div key={label} className="bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-100/50">
                       <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">{label}</p>
@@ -184,16 +193,16 @@ export default function Campaigns() {
                 </div>
 
                 {/* Progress bar */}
-                {c.totalContacts > 0 && (
+                {total > 0 && (
                   <div>
                     <div className="h-2 bg-slate-100 rounded-full overflow-hidden flex">
                       <div
                         className="h-full bg-wa-green rounded-full transition-all duration-500"
-                        style={{ width: `${(totalSuccessful / c.totalContacts) * 100}%` }}
+                        style={{ width: `${Math.min(100, (effectiveDelivered / total) * 100)}%` }}
                       />
                       <div
                         className="h-full bg-cyan-400 transition-all duration-500"
-                        style={{ width: `${((c.readCount || 0) / c.totalContacts) * 100}%` }}
+                        style={{ width: `${Math.min(100, ((c.readCount || 0) / total) * 100)}%` }}
                       />
                     </div>
                   </div>
