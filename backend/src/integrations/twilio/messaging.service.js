@@ -116,8 +116,8 @@ const messagingService = {
         }
       }
 
-      if (resolvedContentSid === "HX85226ed4e3bdc24d4a82a70d97985864") {
-        resolvedContentSid = "HXd4cf82f8979c8bd95001cf4cbc2c0fc4";
+      if (!resolvedContentSid || resolvedContentSid === "HX85226ed4e3bdc24d4a82a70d97985864" || resolvedContentSid === "HXd4cf82f8979c8bd95001cf4cbc2c0fc4") {
+        resolvedContentSid = "HX4afb936dcb321774240a30de0bea6efd";
       }
 
       if (resolvedContentSid) {
