@@ -109,47 +109,36 @@ const messagingService = {
 
     if (resolvedContentSid) {
       options.contentSid = resolvedContentSid;
-      if (params) {
-        let variables = {};
 
-        // Fetch template from repository to inspect variable names registered with Meta/Twilio
-        let tplVarNames = [];
+      // Dynamically fetch exact variable keys expected by Twilio Content SID
+      let expectedKeys = [];
+      try {
+        const contentInfo = await client.content.v1.contents(resolvedContentSid).fetch();
+        if (contentInfo && contentInfo.variables && typeof contentInfo.variables === "object") {
+          expectedKeys = Object.keys(contentInfo.variables);
+        }
+      } catch (fetchErr) {
+        // Fallback to template repository in DB if Twilio fetch fails
         try {
           const templateRepo = require("../../repositories/templateRepository");
           let tpl = await templateRepo.findByContentSid(resolvedContentSid);
           if (!tpl) tpl = await templateRepo.findByName(templateName);
-          if (tpl && Array.isArray(tpl.variables) && tpl.variables.length > 0) {
-            tplVarNames = tpl.variables;
+          if (tpl && Array.isArray(tpl.variables)) {
+            expectedKeys = tpl.variables;
           }
         } catch (e) {}
-
-        if (Array.isArray(params) && params.length > 0) {
-          params.forEach((p, index) => {
-            const val = String(p);
-            // 1. Assign numeric key ("1", "2", etc.)
-            variables[String(index + 1)] = val;
-            
-            // 2. Assign registered variable name if available
-            if (tplVarNames[index]) {
-              variables[String(tplVarNames[index])] = val;
-            } else {
-              // 3. Fallback common variable keys
-              variables["name"] = val;
-              variables["customer_name"] = val;
-            }
-          });
-        } else if (typeof params === "object" && params !== null) {
-          Object.keys(params).forEach((k, idx) => {
-            const val = String(params[k]);
-            variables[k] = val;
-            variables[String(idx + 1)] = val;
-          });
-        }
-
-        if (Object.keys(variables).length > 0) {
-          options.contentVariables = JSON.stringify(variables);
-        }
       }
+
+      if (expectedKeys.length > 0) {
+        const variablesMap = {};
+        const paramArray = Array.isArray(params) ? params : (typeof params === "object" && params !== null ? Object.values(params) : []);
+        expectedKeys.forEach((k, idx) => {
+          const val = paramArray[idx] !== undefined ? String(paramArray[idx]) : (paramArray[0] !== undefined ? String(paramArray[0]) : "Valued Customer");
+          variablesMap[k] = val;
+        });
+        options.contentVariables = JSON.stringify(variablesMap);
+      }
+      // Note: If expectedKeys.length === 0, options.contentVariables is intentionally omitted to avoid Error 63028
 
       if (mediaUrl && typeof mediaUrl === "string" && mediaUrl.trim() && mediaUrl.trim().startsWith("http")) {
         options.mediaUrl = [mediaUrl.trim()];
