@@ -231,10 +231,15 @@ const sendBulk = async (req, res) => {
   });
 };
 
-// Send single message (Synchronous execution with E.164 verification & media attachment support)
 const sendSingle = async (req, res) => {
   const io = req.app.get("io");
-  const { phone, message, type = "text", templateName, params = [], mediaUrl = "" } = req.body;
+  const rawBody = req.body || {};
+  const phone = rawBody.phone || rawBody.to || rawBody.recipient || rawBody.phoneNumber;
+  const message = rawBody.message || rawBody.text || rawBody.bodyText || "";
+  const type = rawBody.type || (rawBody.templateName || rawBody.template_name ? "template" : "text");
+  const templateName = rawBody.templateName || rawBody.template_name || "";
+  const params = Array.isArray(rawBody.params) ? rawBody.params : (rawBody.parameters || []);
+  const mediaUrl = rawBody.mediaUrl || rawBody.media_url || rawBody.imageUrl || "";
 
   if (!phone || (!message && !templateName)) {
     return res.status(400).json({ error: "Phone and message/template are required" });
