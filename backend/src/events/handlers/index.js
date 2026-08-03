@@ -9,10 +9,14 @@ const twilioService = require("../../services/twilioService");
 const { getIo } = require("../../socket");
 const logger = require("../../utils/logger");
 
+const { normalizePhone } = require("../../utils/phone");
+
 const registerHandlers = () => {
   eventBus.subscribe("IncomingMessageEvent", async (payload) => {
     logger.info("Handling IncomingMessageEvent inside event handlers", { messageSid: payload.messageSid });
-    const { from, messageSid, body, profileName } = payload;
+    const rawFrom = payload.from;
+    const from = normalizePhone(rawFrom);
+    const { messageSid, body, profileName } = payload;
     const io = getIo();
 
     try {
@@ -119,7 +123,8 @@ const registerHandlers = () => {
 
   eventBus.subscribe("MessageStatusEvent", async (payload) => {
     logger.info("Handling MessageStatusEvent inside event handlers", { messageSid: payload.messageSid, status: payload.status });
-    const { phone, messageSid, status, errorDetails, errorCategory } = payload;
+    const { phone: rawPhone, messageSid, status, errorDetails, errorCategory } = payload;
+    const phone = normalizePhone(rawPhone);
     const io = getIo();
 
     try {
@@ -133,7 +138,7 @@ const registerHandlers = () => {
         logger.info(`Updated message ${messageSid} status to: ${status}`);
 
         const conversation = await conversationRepository.findByPhone(phone);
-        if (conversation && new Date(conversation.last_timestamp).getTime() === new Date(updated.timestamp).getTime()) {
+        if (conversation) {
           await conversationRepository.updateLastStatus(phone, status);
         }
 

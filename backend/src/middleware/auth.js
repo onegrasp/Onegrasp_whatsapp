@@ -4,20 +4,31 @@ const env = require("../config/env");
 const PUBLIC_EXACT_ROUTES = new Set([
   "/auth/login",
   "/api/v1/auth/login",
+  "/api/auth/login",
   "/health",
   "/api/v1/health",
+  "/api/health",
   "/ready",
   "/live",
   "/webhook",
   "/api/v1/webhook",
+  "/api/webhook",
   "/webhooks",
   "/api/v1/webhooks",
+  "/api/webhooks",
   "/jobs/process-queue"
 ]);
 
 const PUBLIC_PATH_PREFIXES = [
   "/webhook",
-  "/webhooks"
+  "/webhooks",
+  "/api/v1/webhook",
+  "/api/v1/webhooks",
+  "/api/webhook",
+  "/api/webhooks",
+  "/auth",
+  "/api/v1/auth",
+  "/api/auth"
 ];
 
 const authenticateToken = (req, res, next) => {
