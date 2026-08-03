@@ -3,12 +3,11 @@ const { mapTwilioError } = require("./errors");
 const { runWithRetry } = require("./retry");
 const logger = require("../../utils/logger");
 
+const { normalizePhone } = require("../../utils/phone");
+
 const formatToTwilioPhone = (phone) => {
-  const clean = phone.trim().replace(/^whatsapp:/i, "");
-  if (clean.startsWith("+")) {
-    return `whatsapp:${clean}`;
-  }
-  return `whatsapp:+${clean}`;
+  const normalized = normalizePhone(phone);
+  return `whatsapp:${normalized}`;
 };
 
 const getStatusCallback = () => {

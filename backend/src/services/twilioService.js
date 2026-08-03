@@ -2,13 +2,12 @@ const messagingService = require("../integrations/twilio/messaging.service");
 const contentService = require("../integrations/twilio/content.service");
 const logger = require("../utils/logger");
 
+const { normalizePhone } = require("../utils/phone");
+
 const twilioService = {
   formatToTwilioPhone(phone) {
-    const clean = phone.trim().replace(/^whatsapp:/i, "");
-    if (clean.startsWith("+")) {
-      return `whatsapp:${clean}`;
-    }
-    return `whatsapp:+${clean}`;
+    const normalized = normalizePhone(phone);
+    return `whatsapp:${normalized}`;
   },
 
   async sendTemplateMessage(to, templateName, mediaUrl = null) {
