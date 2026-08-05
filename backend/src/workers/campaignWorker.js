@@ -19,22 +19,32 @@ const process = async (job) => {
       .replace(/\{\{(phone|contact_phone|mobile|number)\}\}/gi, job.phone);
   }
 
-  // 2. Personalize template params array if placeholders or empty values are passed
-  let personalizedParams = [];
-  if (job.params && Array.isArray(job.params)) {
-    personalizedParams = job.params.map((p, idx) => {
-      if (typeof p === "string") {
-        const cleanP = p.trim().toLowerCase();
-        if (!cleanP || cleanP === "{{contact_name}}" || cleanP === "{{name}}" || cleanP === "{{1}}" || cleanP === "{{customer_name}}") {
-          return contactName;
-        }
-        if (cleanP === "{{contact_phone}}" || cleanP === "{{phone}}") {
-          return job.phone;
-        }
-      }
-      return p || contactName;
-    });
+  // 2. Personalize template params array safely regardless of data type
+  let rawParams = job.params;
+  if (typeof rawParams === "string") {
+    try {
+      rawParams = JSON.parse(rawParams);
+    } catch (e) {
+      rawParams = [rawParams];
+    }
   }
+  if (!Array.isArray(rawParams) && typeof rawParams === "object" && rawParams !== null) {
+    rawParams = Object.values(rawParams);
+  }
+  const paramArray = Array.isArray(rawParams) ? rawParams : [];
+
+  const personalizedParams = paramArray.map((p, idx) => {
+    if (typeof p === "string") {
+      const cleanP = p.trim().toLowerCase();
+      if (!cleanP || cleanP === "{{contact_name}}" || cleanP === "{{name}}" || cleanP === "{{1}}" || cleanP === "{{customer_name}}") {
+        return contactName;
+      }
+      if (cleanP === "{{contact_phone}}" || cleanP === "{{phone}}") {
+        return job.phone;
+      }
+    }
+    return p || contactName;
+  });
 
   let templateDisplayText = personalizedMessage;
   if (!templateDisplayText || templateDisplayText.startsWith("HX") || templateDisplayText.startsWith("[Template:")) {
