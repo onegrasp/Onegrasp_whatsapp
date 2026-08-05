@@ -19,6 +19,7 @@ import {
   Smartphone,
   Monitor,
   ZoomIn,
+  Eye,
 } from "lucide-react";
 import {
   getTemplates,
@@ -619,6 +620,17 @@ export default function Templates() {
           </div>
 
           <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                handleOpenBuilder(t);
+                setShowFullPreviewModal(true);
+              }}
+              className="bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-200/80 px-2.5 py-1 rounded-xl text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-xs active:scale-[0.97]"
+              title="Click to preview message in realistic WhatsApp chat view"
+            >
+              <Eye size={13} className="shrink-0" />
+              <span>Preview</span>
+            </button>
             {(isDraftLike(t.status) || t.status === "rejected") && (
               <button
                 onClick={() => handleOpenBuilder(t)}
