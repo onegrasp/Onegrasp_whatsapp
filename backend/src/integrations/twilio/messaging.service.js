@@ -74,86 +74,76 @@ const messagingService = {
       options.from = config.fromPhone;
     }
 
-    const hasMedia = mediaUrl && typeof mediaUrl === "string" && mediaUrl.trim() && mediaUrl.trim().startsWith("http");
+    let resolvedContentSid = null;
 
-    if (hasMedia) {
-      // If an image media URL is attached, resolve full offer body text so WhatsApp renders the complete readable text caption below the image poster!
-      const fullText = await resolveTemplateText(templateName, params, "Hello Valued Customer");
-      options.body = fullText;
-      options.mediaUrl = [mediaUrl.trim()];
-    } else {
-      let resolvedContentSid = null;
+    if (typeof templateName === "string" && templateName.startsWith("HX")) {
+      resolvedContentSid = templateName;
+    } else if (templateName) {
+      try {
+        const templateRepo = require("../../repositories/templateRepository");
+        let tpl = await templateRepo.findByName(templateName);
+        if (!tpl) tpl = await templateRepo.findById(templateName);
+        if (!tpl) tpl = await templateRepo.findByContentSid(templateName);
 
-      if (typeof templateName === "string" && templateName.startsWith("HX")) {
-        resolvedContentSid = templateName;
-      } else if (templateName) {
+        if (tpl && tpl.content_sid && tpl.content_sid.startsWith("HX")) {
+          resolvedContentSid = tpl.content_sid;
+        } else {
+          // Query Twilio Content API to auto-resolve approved template SID by friendlyName
+          const list = await client.content.v1.contents.list({ limit: 100 });
+          const match = (list || []).find((t) =>
+            t.sid === templateName ||
+            t.friendlyName === templateName ||
+            t.friendlyName === (tpl?.name || "")
+          );
+          if (match && match.sid) {
+            resolvedContentSid = match.sid;
+            if (tpl) {
+              await templateRepo.update(tpl.id, { content_sid: match.sid, status: "approved" }).catch(() => {});
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn("Could not lookup Content SID for templateName:", { templateName, error: err });
+      }
+    }
+
+    if (!resolvedContentSid || resolvedContentSid === "HX85226ed4e3bdc24d4a82a70d97985864" || resolvedContentSid === "HXd4cf82f8979c8bd95001cf4cbc2c0fc4") {
+      resolvedContentSid = "HX4afb936dcb321774240a30de0bea6efd";
+    }
+
+    if (resolvedContentSid) {
+      options.contentSid = resolvedContentSid;
+
+      // Dynamically fetch exact variable keys expected by Twilio Content SID
+      let expectedKeys = [];
+      try {
+        const contentInfo = await client.content.v1.contents(resolvedContentSid).fetch();
+        if (contentInfo && contentInfo.variables && typeof contentInfo.variables === "object") {
+          expectedKeys = Object.keys(contentInfo.variables);
+        }
+      } catch (fetchErr) {
         try {
           const templateRepo = require("../../repositories/templateRepository");
-          let tpl = await templateRepo.findByName(templateName);
-          if (!tpl) tpl = await templateRepo.findById(templateName);
-          if (!tpl) tpl = await templateRepo.findByContentSid(templateName);
-
-          if (tpl && tpl.content_sid && tpl.content_sid.startsWith("HX")) {
-            resolvedContentSid = tpl.content_sid;
-          } else {
-            // Query Twilio Content API to auto-resolve approved template SID by friendlyName
-            const list = await client.content.v1.contents.list({ limit: 100 });
-            const match = (list || []).find((t) =>
-              t.sid === templateName ||
-              t.friendlyName === templateName ||
-              t.friendlyName === (tpl?.name || "")
-            );
-            if (match && match.sid) {
-              resolvedContentSid = match.sid;
-              if (tpl) {
-                await templateRepo.update(tpl.id, { content_sid: match.sid, status: "approved" }).catch(() => {});
-              }
-            }
+          let tpl = await templateRepo.findByContentSid(resolvedContentSid);
+          if (!tpl) tpl = await templateRepo.findByName(templateName);
+          if (tpl && Array.isArray(tpl.variables)) {
+            expectedKeys = tpl.variables;
           }
-        } catch (err) {
-          logger.warn("Could not lookup Content SID for templateName:", { templateName, error: err });
-        }
+        } catch (e) {}
       }
 
-      if (!resolvedContentSid || resolvedContentSid === "HX85226ed4e3bdc24d4a82a70d97985864" || resolvedContentSid === "HXd4cf82f8979c8bd95001cf4cbc2c0fc4") {
-        resolvedContentSid = "HX4afb936dcb321774240a30de0bea6efd";
+      if (expectedKeys.length > 0) {
+        const variablesMap = {};
+        const paramArray = Array.isArray(params) ? params : (typeof params === "object" && params !== null ? Object.values(params) : []);
+        expectedKeys.forEach((k, idx) => {
+          const val = paramArray[idx] !== undefined ? String(paramArray[idx]) : (paramArray[0] !== undefined ? String(paramArray[0]) : "Valued Customer");
+          variablesMap[k] = val;
+        });
+        options.contentVariables = JSON.stringify(variablesMap);
       }
-
-      if (resolvedContentSid) {
-        options.contentSid = resolvedContentSid;
-
-        // Dynamically fetch exact variable keys expected by Twilio Content SID
-        let expectedKeys = [];
-        try {
-          const contentInfo = await client.content.v1.contents(resolvedContentSid).fetch();
-          if (contentInfo && contentInfo.variables && typeof contentInfo.variables === "object") {
-            expectedKeys = Object.keys(contentInfo.variables);
-          }
-        } catch (fetchErr) {
-          // Fallback to template repository in DB if Twilio fetch fails
-          try {
-            const templateRepo = require("../../repositories/templateRepository");
-            let tpl = await templateRepo.findByContentSid(resolvedContentSid);
-            if (!tpl) tpl = await templateRepo.findByName(templateName);
-            if (tpl && Array.isArray(tpl.variables)) {
-              expectedKeys = tpl.variables;
-            }
-          } catch (e) {}
-        }
-
-        if (expectedKeys.length > 0) {
-          const variablesMap = {};
-          const paramArray = Array.isArray(params) ? params : (typeof params === "object" && params !== null ? Object.values(params) : []);
-          expectedKeys.forEach((k, idx) => {
-            const val = paramArray[idx] !== undefined ? String(paramArray[idx]) : (paramArray[0] !== undefined ? String(paramArray[0]) : "Valued Customer");
-            variablesMap[k] = val;
-          });
-          options.contentVariables = JSON.stringify(variablesMap);
-        }
-      } else {
-        const fullText = await resolveTemplateText(templateName, params, templateName);
-        options.body = fullText;
-      }
+    } else {
+      const fullText = await resolveTemplateText(templateName, params, templateName);
+      options.body = fullText;
     }
 
     const callbackUrl = getStatusCallback();
