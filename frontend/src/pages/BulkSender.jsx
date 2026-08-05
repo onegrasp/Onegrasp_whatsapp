@@ -10,6 +10,12 @@ import {
   Calendar,
   Clock,
   Sparkles,
+  Eye,
+  Smartphone,
+  Maximize2,
+  ExternalLink,
+  Phone,
+  Image as ImageIcon,
 } from "lucide-react";
 import { uploadContacts, getContacts, getContactSets, getTemplates, sendBulkMessages, uploadMediaFile } from "../services/api";
 import { useSocket } from "../context/SocketContext";
@@ -149,9 +155,28 @@ export default function BulkSender() {
   const loadTemplates = async () => {
     try {
       const res = await getTemplates();
-      setTemplates(res.data?.data || []);
+      const rawList = res.data?.data || [];
+
+      // Deduplicate templates by Content SID or lowercased name
+      const map = new Map();
+      rawList.forEach((t) => {
+        const sidKey = t.content_sid || t.contentSid;
+        const nameKey = t.name ? t.name.trim().toLowerCase() : null;
+        const key = sidKey || nameKey || (t._id || t.id);
+
+        if (!map.has(key)) {
+          map.set(key, t);
+        } else {
+          const existing = map.get(key);
+          if (!existing.content_sid && (t.content_sid || t.contentSid)) {
+            map.set(key, t);
+          }
+        }
+      });
+
+      const uniqueTemplates = Array.from(map.values());
+      setTemplates(uniqueTemplates);
     } catch (err) {
-      // Templates might not be available if Meta creds not set
       console.warn("Templates not available:", err.message);
     }
   };
@@ -439,118 +464,179 @@ export default function BulkSender() {
             </div>
           </div>
 
-          {/* Template picker */}
-          {msgType === "template" && (
-            <div className="mb-4">
-              <label className="block text-xs text-slate-400 mb-1.5">Template</label>
-              {templates.length > 0 ? (
-                <div className="relative mb-3">
-                  <select
-                    value={selectedTemplate}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSelectedTemplate(val);
-                      const tpl = templates.find(t => (t._id || t.id) === val || t.content_sid === val || t.name === val);
-                      if (tpl && (tpl.header_image_url || tpl.headerImageUrl)) {
-                        setCampaignMediaUrl(tpl.header_image_url || tpl.headerImageUrl);
-                      }
-                    }}
-                    className="input appearance-none pr-8 font-medium text-slate-700"
-                  >
-                    <option value="">Select template...</option>
-                    {templates.map((t) => (
-                      <option 
-                        key={t._id || t.id} 
-                        value={t._id || t.id} 
-                        disabled={t.status?.toLowerCase() === "rejected"}
+              {/* Template picker */}
+              {msgType === "template" && (
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">Template</label>
+                    {selectedTemplate && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPreviewModal(true)}
+                        className="bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-200/80 px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs shrink-0 active:scale-[0.97]"
+                        title="Click to open full WhatsApp chat preview"
                       >
-                        {t.name} ({t.status || "draft"}) {t.content_sid ? `[${t.content_sid.slice(0, 8)}...]` : ""} {t.type === "media" || t.header_image_url ? "📷" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                </div>
-              ) : (
-                <div className="mb-3">
-                  <input
-                    value={selectedTemplate}
-                    onChange={(e) => setSelectedTemplate(e.target.value)}
-                    placeholder="Enter template name exactly"
-                    className="input"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">
-                    Enter the exact approved template name from Meta.
-                  </p>
-                </div>
-              )}
-
-              {/* Dynamic Variable Input Fields */}
-              {(() => {
-                const tpl = templates.find(t => t.content_sid === selectedTemplate || t.name === selectedTemplate || (t._id || t.id) === selectedTemplate);
-                if (!tpl) return null;
-                const vars = getTemplateVariables(tpl);
-                const isMediaTpl = tpl.type === "media" || !!tpl.header_image_url;
-
-                return (
-                  <div className="space-y-2.5 mb-3">
-                    {isMediaTpl && (
-                      <div className="p-2.5 bg-emerald-50 border border-emerald-200/60 rounded-xl text-[11px] text-emerald-800 flex items-center gap-2">
-                        <Sparkles size={12} className="text-emerald-600 shrink-0" />
-                        <span>This approved template has an image header. Verify or attach your image URL below.</span>
-                      </div>
-                    )}
-
-                    {vars.length > 0 && (
-                      <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-2.5">
-                        <p className="text-xs font-bold text-slate-600 mb-1 select-none">Template Variables</p>
-                        <div className="space-y-2">
-                          {vars.map((v) => {
-                            const val = varValues[v] || "";
-                            const selectVal = val === "{{contact_name}}" || val === "{{contact_phone}}" ? val : (val === "" ? "" : "static");
-                            
-                            return (
-                              <div key={v} className="p-2 bg-white rounded-xl border border-slate-150/65 shadow-sm space-y-1.5">
-                                <label className="block text-[10px] font-semibold text-slate-500">Variable {v}</label>
-                                
-                                <select
-                                  value={selectVal}
-                                  onChange={(e) => {
-                                    const sel = e.target.value;
-                                    if (sel === "static") {
-                                      setVarValues(prev => ({ ...prev, [v]: "" }));
-                                    } else {
-                                      setVarValues(prev => ({ ...prev, [v]: sel }));
-                                    }
-                                  }}
-                                  className="input py-1 px-2 text-xs"
-                                >
-                                  <option value="">Select variable source...</option>
-                                  <option value="{{contact_name}}">Contact Name (Dynamic)</option>
-                                  <option value="{{contact_phone}}">Contact Phone (Dynamic)</option>
-                                  <option value="static">Custom Static Text</option>
-                                </select>
-
-                                {selectVal === "static" && (
-                                  <input
-                                    type="text"
-                                    value={val}
-                                    onChange={(e) => setVarValues(prev => ({ ...prev, [v]: e.target.value }))}
-                                    placeholder={`Enter static text for variable ${v}`}
-                                    className="input py-1.5 px-2 text-xs"
-                                    required
-                                  />
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
+                        <Eye size={13} className="shrink-0" />
+                        <span>Preview Template</span>
+                      </button>
                     )}
                   </div>
-                );
-              })()}
-            </div>
-          )}
+
+                  {templates.length > 0 ? (
+                    <div className="relative mb-3">
+                      <select
+                        value={selectedTemplate}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setSelectedTemplate(val);
+                          const tpl = templates.find(t => (t._id || t.id) === val || t.content_sid === val || t.name === val);
+                          if (tpl && (tpl.header_image_url || tpl.headerImageUrl)) {
+                            setCampaignMediaUrl(tpl.header_image_url || tpl.headerImageUrl);
+                          }
+                        }}
+                        className="input appearance-none pr-8 font-medium text-slate-700"
+                      >
+                        <option value="">Select template...</option>
+                        {templates.map((t) => (
+                          <option 
+                            key={t._id || t.id} 
+                            value={t._id || t.id} 
+                            disabled={t.status?.toLowerCase() === "rejected"}
+                          >
+                            {t.name} ({t.status || "draft"}) {t.content_sid ? `[${t.content_sid.slice(0, 8)}...]` : ""} {t.type === "media" || t.header_image_url ? "📷" : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    </div>
+                  ) : (
+                    <div className="mb-3">
+                      <input
+                        value={selectedTemplate}
+                        onChange={(e) => setSelectedTemplate(e.target.value)}
+                        placeholder="Enter template name exactly"
+                        className="input"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        Enter the exact approved template name from Meta.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Dynamic Variable Input Fields & Live Preview */}
+                  {(() => {
+                    const tpl = templates.find(t => t.content_sid === selectedTemplate || t.name === selectedTemplate || (t._id || t.id) === selectedTemplate);
+                    if (!tpl) return null;
+                    const vars = getTemplateVariables(tpl);
+                    const isMediaTpl = tpl.type === "media" || !!tpl.header_image_url;
+                    const previewHeaderImg = campaignMediaUrl || tpl.header_image_url || tpl.headerImageUrl;
+
+                    return (
+                      <div className="space-y-3 mb-3">
+                        {isMediaTpl && (
+                          <div className="p-2.5 bg-emerald-50 border border-emerald-200/60 rounded-xl text-[11px] text-emerald-800 flex items-center gap-2">
+                            <Sparkles size={12} className="text-emerald-600 shrink-0" />
+                            <span>This approved template has an image header. Verify or attach your image URL below.</span>
+                          </div>
+                        )}
+
+                        {vars.length > 0 && (
+                          <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-2.5">
+                            <p className="text-xs font-bold text-slate-600 mb-1 select-none">Template Variables</p>
+                            <div className="space-y-2">
+                              {vars.map((v) => {
+                                const val = varValues[v] || "";
+                                const selectVal = val === "{{contact_name}}" || val === "{{contact_phone}}" ? val : (val === "" ? "" : "static");
+                                
+                                return (
+                                  <div key={v} className="p-2 bg-white rounded-xl border border-slate-150/65 shadow-sm space-y-1.5">
+                                    <label className="block text-[10px] font-semibold text-slate-500">Variable {v}</label>
+                                    
+                                    <select
+                                      value={selectVal}
+                                      onChange={(e) => {
+                                        const sel = e.target.value;
+                                        if (sel === "static") {
+                                          setVarValues(prev => ({ ...prev, [v]: "" }));
+                                        } else {
+                                          setVarValues(prev => ({ ...prev, [v]: sel }));
+                                        }
+                                      }}
+                                      className="input py-1 px-2 text-xs"
+                                    >
+                                      <option value="">Select variable source...</option>
+                                      <option value="{{contact_name}}">Contact Name (Dynamic)</option>
+                                      <option value="{{contact_phone}}">Contact Phone (Dynamic)</option>
+                                      <option value="static">Custom Static Text</option>
+                                    </select>
+
+                                    {selectVal === "static" && (
+                                      <input
+                                        type="text"
+                                        value={val}
+                                        onChange={(e) => setVarValues(prev => ({ ...prev, [v]: e.target.value }))}
+                                        placeholder={`Enter static text for variable ${v}`}
+                                        className="input py-1.5 px-2 text-xs"
+                                        required
+                                      />
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* In-Line WhatsApp Chat Preview Card */}
+                        <div className="border border-slate-200/80 rounded-2xl p-3 bg-[#efeae2]/60 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                              <Smartphone size={11} className="text-emerald-600" />
+                              WhatsApp Message Preview
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setShowPreviewModal(true)}
+                              className="text-[10px] font-bold text-emerald-700 hover:underline flex items-center gap-0.5"
+                            >
+                              <Eye size={11} /> Full Screen
+                            </button>
+                          </div>
+
+                          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-w-full">
+                            {previewHeaderImg && (
+                              <div className="w-full h-32 bg-slate-900/5 border-b border-slate-100 flex items-center justify-center overflow-hidden">
+                                <img src={previewHeaderImg} alt="Header" className="w-full h-full object-cover" />
+                              </div>
+                            )}
+
+                            <div className="p-3 space-y-1.5">
+                              <p className="text-[11.5px] leading-relaxed text-slate-800 font-normal whitespace-pre-wrap break-words">
+                                {renderTemplateBodyPreview(tpl)}
+                              </p>
+                              <div className="flex items-center justify-end gap-1 text-[9px] text-slate-400 select-none">
+                                <span>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                                <span className="text-[#53bdeb] font-bold text-[10px]">✓✓</span>
+                              </div>
+                            </div>
+
+                            {tpl.buttons && tpl.buttons.length > 0 && (
+                              <div className="border-t border-slate-100 bg-white divide-y divide-slate-100">
+                                {tpl.buttons.map((btn, index) => (
+                                  <div key={index} className="py-1.5 px-3 text-center text-[11px] font-semibold text-[#00a884] flex items-center justify-center gap-1">
+                                    {btn.type === "URL" ? <ExternalLink size={10} /> : btn.type === "phone" ? <Phone size={10} /> : <Sparkles size={10} />}
+                                    <span>{btn.text}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
           {/* Free text */}
           {msgType === "text" && (
@@ -725,6 +811,89 @@ export default function BulkSender() {
           </p>
         </div>
       </div>
+
+      {/* Full Screen WhatsApp Chat Preview Modal */}
+      {showPreviewModal && selectedTemplate && (() => {
+        const tpl = templates.find(t => t.content_sid === selectedTemplate || t.name === selectedTemplate || (t._id || t.id) === selectedTemplate);
+        if (!tpl) return null;
+        const previewHeaderImg = campaignMediaUrl || tpl.header_image_url || tpl.headerImageUrl;
+
+        return (
+          <div className="fixed inset-0 z-[80] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
+            <div className="bg-slate-900 text-white rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl border border-slate-800 overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-900/90 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+                    <Smartphone size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      WhatsApp Message Preview ({tpl.name})
+                    </h3>
+                    <p className="text-xs text-slate-400">See exact visual appearance of message before dispatching</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowPreviewModal(false)}
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 bg-[#0b141a] flex items-center justify-center">
+                <div className="w-full max-w-[420px] rounded-3xl bg-[#efeae2] border border-slate-700 shadow-2xl overflow-hidden flex flex-col my-auto">
+                  <div className="bg-[#008069] text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-md">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-xs font-bold text-white">
+                        OG
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold flex items-center gap-1">
+                          <span>OneGrasp</span>
+                          <span className="text-[9px] bg-emerald-400/30 text-emerald-100 rounded-full px-1 font-bold">✓</span>
+                        </div>
+                        <div className="text-[9px] text-emerald-100/90">Official Business Account</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 flex flex-col justify-end gap-3 bg-[#efeae2] bg-repeat min-h-[380px]" style={{ backgroundImage: "radial-gradient(#cbd5e1 0.8px, transparent 0.8px)", backgroundSize: "18px 18px" }}>
+                    <div className="bg-white rounded-2xl rounded-tr-xs shadow-lg border border-slate-200 max-w-[98%] w-full self-end overflow-hidden flex flex-col">
+                      {previewHeaderImg && (
+                        <div className="w-full bg-slate-900/5 border-b border-slate-100 flex items-center justify-center overflow-hidden">
+                          <img src={previewHeaderImg} alt="Header" className="w-full h-full object-cover max-h-48" />
+                        </div>
+                      )}
+
+                      <div className="p-4 space-y-2">
+                        <p className="text-[13px] leading-relaxed text-slate-800 font-normal whitespace-pre-wrap break-words">
+                          {renderTemplateBodyPreview(tpl)}
+                        </p>
+                        <div className="flex items-center justify-end gap-1 text-[10px] text-slate-400 select-none pt-1">
+                          <span>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                          <span className="text-[#53bdeb] font-bold text-[11px]">✓✓</span>
+                        </div>
+                      </div>
+
+                      {tpl.buttons && tpl.buttons.length > 0 && (
+                        <div className="border-t border-slate-150 bg-white divide-y divide-slate-150">
+                          {tpl.buttons.map((btn, index) => (
+                            <div key={index} className="py-2.5 px-3 text-center text-xs font-semibold text-[#00a884] flex items-center justify-center gap-1.5">
+                              {btn.type === "URL" ? <ExternalLink size={12} /> : btn.type === "phone" ? <Phone size={12} /> : <Sparkles size={12} />}
+                              <span>{btn.text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
