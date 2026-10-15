@@ -1,0 +1,93 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: #FFFFFF;
+    color: #0F172A;
+    font-family: "Poppins", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #E2E8F0;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #94A3B8;
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #25d366;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white border border-surface-border rounded-3xl shadow-sm;
+  }
+
+  .btn-primary {
+    @apply bg-wa-green hover:bg-wa-dark text-slate-900 font-semibold px-4 py-2 rounded-3xl transition-colors duration-150 flex items-center gap-2 text-sm;
+  }
+
+  .btn-ghost {
+    @apply text-slate-900 hover:text-wa-green hover:bg-wa-green/10 px-3 py-2 rounded-xl transition-colors duration-150 flex items-center gap-2 text-sm;
+  }
+
+  .input {
+    @apply bg-white border border-surface-border text-slate-900 placeholder-slate-500 rounded-xl px-3 py-2 text-sm outline-none focus:border-wa-green transition-colors duration-150 w-full;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700;
+  }
+
+  .status-sent {
+    @apply text-slate-500;
+  }
+
+  .status-delivered {
+    @apply text-blue-500;
+  }
+
+  .status-read {
+    @apply text-wa-green;
+  }
+
+  .status-failed {
+    @apply text-red-500;
+  }
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
