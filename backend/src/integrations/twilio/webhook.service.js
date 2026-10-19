@@ -1,20 +1,31 @@
 const twilio = require("twilio");
 const { getTwilioConfig } = require("./client");
+const settingsRepository = require("../../repositories/settingsRepository");
 const logger = require("../../utils/logger");
 
 const verifySignature = async (req) => {
   try {
-    const config = await getTwilioConfig();
-    const validateSignature = config.validateWebhookSignature === true;
+    // Validation is ON by default and is only skipped when explicitly disabled
+    // via the `validateWebhookSignature` setting. Any error below fails closed.
+    let validate = true;
+    try {
+      const row = await settingsRepository.findByKey("validateWebhookSignature");
+      if (row && (row.value === false || row.value === "false")) {
+        validate = false;
+      }
+    } catch (e) {
+      // Could not read the setting — keep the secure default (validate).
+    }
 
-    if (!validateSignature) {
+    if (!validate) {
       return true;
     }
 
+    const config = await getTwilioConfig();
     const authToken = config.authToken;
     if (!authToken) {
-      logger.warn("Twilio signature validation enabled but no Auth Token is configured. Bypassing validation.");
-      return true;
+      logger.error("Twilio signature validation is enabled but no Auth Token is configured. Rejecting request (fail closed).");
+      return false;
     }
 
     const signature = req.headers["x-twilio-signature"];
@@ -30,7 +41,7 @@ const verifySignature = async (req) => {
 
     const isValid = twilio.validateRequest(authToken, signature, fullUrl, params);
     if (!isValid) {
-      logger.error("Twilio Signature Validation FAILED!", { url: fullUrl, signature });
+      logger.error("Twilio Signature Validation FAILED!", { url: fullUrl });
       return false;
     }
 

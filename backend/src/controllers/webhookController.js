@@ -2,7 +2,8 @@ const eventBus = require("../events/eventBus");
 const { verifySignature, normalizePayload } = require("../integrations/twilio/webhook.service");
 const { mapStatus } = require("../integrations/twilio/status.service");
 const { mapTwilioError } = require("../integrations/twilio/errors");
-const { verifyMetaWebhook, parseMetaWebhookBody } = require("../integrations/meta/webhook.service");
+const { verifyMetaWebhook, verifyMetaSignature, parseMetaWebhookBody } = require("../integrations/meta/webhook.service");
+const env = require("../config/env");
 const logger = require("../utils/logger");
 
 const handleMetaWebhookVerification = async (req, res, next) => {
@@ -20,6 +21,20 @@ const handleMetaWebhookVerification = async (req, res, next) => {
 
 const handleMetaWebhookEvent = async (req, res, next) => {
   try {
+    // Authenticate the sender via the App Secret signature. Without this, anyone
+    // can forge inbound messages and delivery statuses.
+    const sig = verifyMetaSignature(req);
+    if (sig.configured && !sig.valid) {
+      logger.warn("Rejected Meta webhook: invalid X-Hub-Signature-256");
+      return res.status(403).send("Forbidden: invalid signature");
+    }
+    if (!sig.configured) {
+      logger.warn("META_APP_SECRET is not set — Meta webhook signatures cannot be verified.");
+      if (env.IS_PRODUCTION) {
+        return res.status(403).send("Forbidden: signature verification not configured");
+      }
+    }
+
     const events = parseMetaWebhookBody(req.body);
     logger.info(`Received Meta Webhook Payload with ${events.length} parsed event(s).`);
 

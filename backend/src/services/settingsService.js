@@ -19,7 +19,7 @@ const settingsService = {
     if (settingsObj.twilioAuthToken === undefined) settingsObj.twilioAuthToken = "";
     if (settingsObj.twilioWhatsappNumber === undefined) settingsObj.twilioWhatsappNumber = "";
     if (settingsObj.twilioMessagingServiceSid === undefined) settingsObj.twilioMessagingServiceSid = "";
-    if (settingsObj.validateWebhookSignature === undefined) settingsObj.validateWebhookSignature = false;
+    if (settingsObj.validateWebhookSignature === undefined) settingsObj.validateWebhookSignature = true;
     if (settingsObj.sendingRate === undefined) settingsObj.sendingRate = 2;
 
     if (settingsObj.twilioAuthToken) {

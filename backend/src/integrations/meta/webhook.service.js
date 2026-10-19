@@ -18,27 +18,47 @@ const verifyMetaWebhook = async (req) => {
   return { isValid: false, challenge: null };
 };
 
-const verifyMetaSignature = async (req) => {
-  const config = await getMetaConfig();
-  const signature = req.headers["x-hub-signature-256"];
+/**
+ * Verify Meta's X-Hub-Signature-256 header. Meta signs the *raw* request body
+ * with the App Secret (not the access token) using HMAC-SHA256. We therefore
+ * verify against `req.rawBody` (captured by the JSON body parser) and the
+ * configured META_APP_SECRET.
+ *
+ * Returns { configured, valid }:
+ *   configured=false -> no app secret set, so verification cannot be performed
+ *   valid            -> whether the signature matched (only meaningful when configured)
+ */
+const verifyMetaSignature = (req) => {
+  const env = require("../../config/env");
+  const appSecret = env.META_APP_SECRET;
 
-  if (!signature || !config.accessToken) {
-    // If no app secret signature header or unconfigured, bypass or warn
-    return true;
+  if (!appSecret) {
+    return { configured: false, valid: false };
+  }
+
+  const signature = req.headers["x-hub-signature-256"];
+  if (!signature || !signature.startsWith("sha256=")) {
+    return { configured: true, valid: false };
   }
 
   try {
-    const elements = signature.split("=");
-    const signatureHash = elements[1];
-    const expectedHash = crypto
-      .createHmac("sha256", config.accessToken)
-      .update(JSON.stringify(req.body))
+    const raw = req.rawBody && Buffer.isBuffer(req.rawBody)
+      ? req.rawBody
+      : Buffer.from(JSON.stringify(req.body || {}), "utf8");
+
+    const expected = "sha256=" + crypto
+      .createHmac("sha256", appSecret)
+      .update(raw)
       .digest("hex");
 
-    return crypto.timingSafeEqual(Buffer.from(signatureHash), Buffer.from(expectedHash));
+    const a = Buffer.from(signature, "utf8");
+    const b = Buffer.from(expected, "utf8");
+    if (a.length !== b.length) return { configured: true, valid: false };
+
+    return { configured: true, valid: crypto.timingSafeEqual(a, b) };
   } catch (err) {
     logger.warn("Meta signature verification failed:", { error: err.message });
-    return false;
+    return { configured: true, valid: false };
   }
 };
 

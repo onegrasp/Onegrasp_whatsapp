@@ -16,7 +16,9 @@ const PUBLIC_EXACT_ROUTES = new Set([
   "/webhooks",
   "/api/v1/webhooks",
   "/api/webhooks",
-  "/jobs/process-queue"
+  "/jobs/process-queue",
+  "/api/jobs/process-queue",
+  "/api/v1/jobs/process-queue"
 ]);
 
 const PUBLIC_PATH_PREFIXES = [
@@ -58,7 +60,7 @@ const authenticateToken = (req, res, next) => {
   }
 
   try {
-    const verified = jwt.verify(token, env.JWT_SECRET || "whatsapp-bulk-messaging-system-secret-key-12345");
+    const verified = jwt.verify(token, env.JWT_SECRET);
     req.user = verified;
     next();
   } catch (err) {

@@ -11,23 +11,41 @@ const healthRoutes = require("./health");
 const logsRoutes = require("./logs");
 
 const jwt = require("jsonwebtoken");
-const JWT_SECRET = process.env.JWT_SECRET || "whatsapp-bulk-messaging-system-secret-key-12345";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+const crypto = require("crypto");
+const env = require("../../config/env");
 
-// Auth login route with anti-timing attack delay and 24h session expiration
+// Constant-time password comparison that does not leak length via early return.
+const passwordMatches = (candidate, expected) => {
+  if (!expected) return false; // login disabled until a password is configured
+  const a = Buffer.from(String(candidate || ""), "utf8");
+  const b = Buffer.from(String(expected), "utf8");
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+};
+
+// Auth login route with 24h session expiration
 router.post("/auth/login", async (req, res) => {
   const { password } = req.body || {};
-  const expectedPassword = process.env.ADMIN_PASSWORD || "admin123";
-  const jwtSecret = process.env.JWT_SECRET || "whatsapp-bulk-messaging-system-secret-key-12345";
-  
-  if (password === expectedPassword) {
-    const token = jwt.sign({ role: "admin", iat: Math.floor(Date.now() / 1000) }, jwtSecret, { expiresIn: "24h" });
+
+  if (!env.ADMIN_PASSWORD) {
+    return res.status(503).json({
+      success: false,
+      error: { code: "not_configured", message: "Admin login is not configured on this server." },
+    });
+  }
+
+  if (passwordMatches(password, env.ADMIN_PASSWORD)) {
+    const token = jwt.sign(
+      { role: "admin", iat: Math.floor(Date.now() / 1000) },
+      env.JWT_SECRET,
+      { expiresIn: "24h" }
+    );
     return res.json({ success: true, token });
   }
 
-  // Artificial 500ms delay on failure to prevent timing attack enumeration
+  // Small delay on failure to blunt rapid guessing.
   await new Promise((resolve) => setTimeout(resolve, 500));
-  
+
   return res.status(401).json({
     success: false,
     error: {

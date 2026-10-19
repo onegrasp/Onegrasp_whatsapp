@@ -120,26 +120,37 @@ const updateCampaignProgress = async (campaignId, phone, status) => {
     const counts = await jobRepository.getCountsByCampaignId(campaignId);
     const { deliveredCount, readCount } = await messageRepository.countDeliveredAndRead(campaignId);
 
+    // Recipients that failed pre-flight validation (invalid phone, opt-out)
+    // never became job rows, so account for them explicitly instead of letting
+    // the job-only counts overwrite and hide them.
+    let campaign = null;
+    try { campaign = await campaignRepository.findById(campaignId); } catch (e) { /* ignore */ }
+    const totalContacts = (campaign && campaign.total_contacts) || counts.total;
+    const preflightFailed = Math.max(0, totalContacts - counts.total);
+
     const processedJobs = counts.completed + counts.failed;
-    const campaignStatus = processedJobs === counts.total ? "completed" : "running";
+    const totalFailed = counts.failed + preflightFailed;
+    const allProcessed = counts.total === 0 ? true : processedJobs >= counts.total;
+    const campaignStatus = allProcessed ? "completed" : "running";
 
     await campaignRepository.update(campaignId, {
       sent_count: counts.completed,
-      failed_count: counts.failed,
+      failed_count: totalFailed,
       delivered_count: deliveredCount,
       read_count: readCount,
       status: campaignStatus,
     });
 
-    const progressPercent = counts.total > 0 ? Math.round((processedJobs / counts.total) * 100) : 0;
+    const processedIncludingPreflight = processedJobs + preflightFailed;
+    const progressPercent = totalContacts > 0 ? Math.round((processedIncludingPreflight / totalContacts) * 100) : 0;
 
     if (io) {
-      if (processedJobs === counts.total) {
+      if (allProcessed) {
         io.emit("campaign_complete", {
           campaignId,
           sentCount: counts.completed,
-          failedCount: counts.failed,
-          total: counts.total,
+          failedCount: totalFailed,
+          total: totalContacts,
         });
       } else {
         io.emit("campaign_progress", {
@@ -153,7 +164,7 @@ const updateCampaignProgress = async (campaignId, phone, status) => {
       io.emit("campaign_update", {
         campaignId,
         sentCount: counts.completed,
-        failedCount: counts.failed,
+        failedCount: totalFailed,
         deliveredCount: deliveredCount,
         readCount: readCount,
         status: campaignStatus,

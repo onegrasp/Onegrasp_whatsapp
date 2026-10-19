@@ -21,6 +21,15 @@ const { registerHandlers } = require("./events/handlers");
 const app = express();
 const server = http.createServer(app);
 
+// Fail loudly instead of leaving the process in an undefined state. A rejected
+// promise in a worker or handler would otherwise crash silently or hang.
+process.on("unhandledRejection", (reason) => {
+  logger.error("Unhandled promise rejection", { error: reason instanceof Error ? reason : new Error(String(reason)) });
+});
+process.on("uncaughtException", (err) => {
+  logger.error("Uncaught exception", { error: err });
+});
+
 // Serverless Socket IP Fallback Middleware
 app.use((req, res, next) => {
   if (!req.socket) {
@@ -36,20 +45,30 @@ const allowedOrigins = env.FRONTEND_URL && env.FRONTEND_URL !== "*"
   ? env.FRONTEND_URL.split(",").map((o) => o.trim())
   : ["https://onegraspconnects.vercel.app", "http://localhost:5173", "http://localhost:3000"];
 
+const isOriginAllowed = (origin) => {
+  // No Origin header: non-browser clients (curl, server-to-server, webhooks).
+  if (!origin) return true;
+  return allowedOrigins.includes("*") || allowedOrigins.includes(origin);
+};
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      return callback(null, true); // Permissive fallback for standard web browser requests
+      // Reject disallowed origins by withholding CORS headers (callback with
+      // false), rather than reflecting every origin back.
+      return callback(null, isOriginAllowed(origin));
     },
     credentials: true,
   })
 );
 
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ limit: "10mb", extended: true }));
+// Capture the raw request body so webhook signatures (e.g. Meta's
+// X-Hub-Signature-256) can be verified against exactly what was received.
+app.use(express.json({
+  limit: "2mb",
+  verify: (req, res, buf) => { req.rawBody = buf; },
+}));
+app.use(express.urlencoded({ limit: "2mb", extended: true }));
 
 // Request context & tracing
 app.use(contextMiddleware);
@@ -62,8 +81,9 @@ applySecurity(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: (origin, callback) => callback(null, isOriginAllowed(origin)),
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
@@ -73,7 +93,14 @@ setIo(io);
 // Core event bus handling configuration
 registerHandlers();
 
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+// Serve uploaded media as downloads with MIME sniffing disabled, so an uploaded
+// HTML/SVG file cannot be rendered as an active document in the same origin.
+app.use("/uploads", express.static(path.join(__dirname, "../uploads"), {
+  setHeaders: (res) => {
+    res.setHeader("Content-Disposition", "attachment");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+  },
+}));
 
 // Public Health Check Endpoints
 app.get("/", (req, res) => {

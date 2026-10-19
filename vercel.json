@@ -11,5 +11,11 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/jobs/process-queue",
+      "schedule": "* * * * *"
+    }
   ]
 }

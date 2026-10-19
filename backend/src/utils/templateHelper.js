@@ -135,12 +135,29 @@ async function resolveTemplateSendTarget(templateName, provider) {
 
 /**
  * Resolve template body text by substituting parameters (UI / logs / Twilio body fallback only).
+ *
+ * `renderedFallback` is the message the caller has already rendered for this
+ * recipient. When it is a complete string (no unresolved {{placeholders}} and
+ * not a Twilio Content SID) it is delivered verbatim — this is the normal case
+ * for UI and queued sends, and returning it untouched is what prevents the
+ * silent truncation that used to occur when the stored template body was
+ * re-derived and any placeholder that could not be mapped was deleted.
  */
-async function resolveTemplateText(templateName, params = [], defaultFallback = "") {
-  if (!templateName && !defaultFallback) {
+async function resolveTemplateText(templateName, params = [], renderedFallback = "") {
+  const fallback = String(renderedFallback || "");
+  const fallbackIsHx = fallback.startsWith("HX");
+  const fallbackHasPlaceholders = /\{\{[^}]+\}\}/.test(fallback);
+
+  if (!templateName && !fallback) {
     return "";
   }
 
+  // 1. Already-rendered caller text with no leftover placeholders → deliver as-is.
+  if (fallback && !fallbackIsHx && !fallbackHasPlaceholders) {
+    return fallback;
+  }
+
+  // 2. Otherwise pick a body to substitute into: stored template body first.
   let bodyText = "";
 
   try {
@@ -152,11 +169,14 @@ async function resolveTemplateText(templateName, params = [], defaultFallback = 
     logger.warn("Could not query template repository for resolution:", { error: e.message });
   }
 
-  if (!bodyText || bodyText.startsWith("HX")) {
+  // 3. Fall back to the live Twilio Content body only when the identifier is an
+  //    HX SID. The Twilio client is instantiated lazily inside this guard so a
+  //    plain-name or fallback-only resolution never makes a network round-trip.
+  if ((!bodyText || bodyText.startsWith("HX")) && templateName && String(templateName).startsWith("HX")) {
     try {
       const { getTwilioClient } = require("../integrations/twilio/client");
       const client = await getTwilioClient();
-      if (templateName && String(templateName).startsWith("HX") && client.content) {
+      if (client.content) {
         const contentInfo = await client.content.v1.contents(templateName).fetch().catch(() => null);
         if (contentInfo && contentInfo.types) {
           const typeObj = Object.values(contentInfo.types)[0];
@@ -170,14 +190,13 @@ async function resolveTemplateText(templateName, params = [], defaultFallback = 
     }
   }
 
+  // 4. Last resort: substitute into the caller-provided fallback template text.
   if (!bodyText || bodyText.startsWith("HX")) {
-    bodyText = defaultFallback && !String(defaultFallback).startsWith("HX")
-      ? defaultFallback
-      : "";
+    bodyText = fallback && !fallbackIsHx ? fallback : "";
   }
 
   if (!bodyText) {
-    return defaultFallback || `[Template: ${templateName}]`;
+    return `[Template: ${templateName}]`;
   }
 
   const paramArray = Array.isArray(params)
@@ -186,16 +205,18 @@ async function resolveTemplateText(templateName, params = [], defaultFallback = 
 
   paramArray.forEach((p, index) => {
     const val = sanitizeVariableValue(p);
-    bodyText = bodyText.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, "g"), val);
+    bodyText = bodyText.replace(new RegExp(`\\{\\{\\s*${index + 1}\\s*\\}\\}`, "g"), val);
   });
 
   if (paramArray.length > 0) {
     const firstVal = sanitizeVariableValue(paramArray[0]);
     bodyText = bodyText
-      .replace(/\{\{(name|contact_name|customer_name|recipient_name)\}\}/gi, firstVal);
+      .replace(/\{\{\s*(name|contact_name|customer_name|recipient_name)\s*\}\}/gi, firstVal);
   }
 
-  bodyText = bodyText.replace(/\{\{(\d+|\w+)\}\}/g, "").trim();
+  // Remove only the placeholders we genuinely could not resolve, keeping the
+  // surrounding words intact rather than cutting the message short.
+  bodyText = bodyText.replace(/\{\{[^}]+\}\}/g, "").trim();
 
   return bodyText;
 }

@@ -111,12 +111,7 @@ const messagingService = {
       }
     }
 
-    // Bypass old legacy Content SIDs so body text matter is delivered cleanly to WhatsApp
-    if (resolvedContentSid === "HX4afb936dcb321774240a30de0bea6efd" || resolvedContentSid === "HX85226ed4e3bdc24d4a82a70d97985864" || resolvedContentSid === "HXd4cf82f8979c8bd95001cf4cbc2c0fc4") {
-      resolvedContentSid = null;
-    }
-
-    // Only set contentSid if it is a valid non-legacy HX Content SID
+    // Only set contentSid if it is a valid HX Content SID
     if (resolvedContentSid && resolvedContentSid.startsWith("HX")) {
       options.contentSid = resolvedContentSid;
 
@@ -151,7 +146,10 @@ const messagingService = {
         options.contentVariables = JSON.stringify(variablesMap);
       }
     } else {
-      const fullText = await resolveTemplateText(templateName, params, fallbackMessage || templateName);
+      // No usable Content SID: deliver the already-rendered message as a session
+      // body. Pass only the real fallback text (never the template name) so a
+      // missing fallback does not get sent as the literal template identifier.
+      const fullText = await resolveTemplateText(templateName, params, fallbackMessage || "");
       options.body = fullText;
     }
 

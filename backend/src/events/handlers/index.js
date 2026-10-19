@@ -20,6 +20,17 @@ const registerHandlers = () => {
     const io = getIo();
 
     try {
+      // Webhook deliveries are at-least-once. If we have already stored this
+      // provider message id, skip it so unread counts are not double-incremented
+      // and duplicate rows are not attempted.
+      if (messageSid) {
+        const existingMsg = await messageRepository.findByMessageId(messageSid).catch(() => null);
+        if (existingMsg) {
+          logger.info("Duplicate inbound webhook ignored", { messageSid });
+          return;
+        }
+      }
+
       let contact = await contactRepository.findByPhone(from);
       if (!contact) {
         try {
@@ -157,26 +168,36 @@ const registerHandlers = () => {
             const counts = await jobRepository.getCountsByCampaignId(campaignId);
             const { deliveredCount, readCount } = await messageRepository.countDeliveredAndRead(campaignId);
 
+            // Account for recipients that failed pre-flight validation and
+            // never became job rows, so their failures are not overwritten.
+            let campaign = null;
+            try { campaign = await campaignRepository.findById(campaignId); } catch (e) { /* ignore */ }
+            const totalContacts = (campaign && campaign.total_contacts) || counts.total;
+            const preflightFailed = Math.max(0, totalContacts - counts.total);
+
             const processedJobs = counts.completed + counts.failed;
-            const campaignStatus = processedJobs === counts.total ? "completed" : "running";
+            const totalFailed = counts.failed + preflightFailed;
+            const allProcessed = counts.total === 0 ? true : processedJobs >= counts.total;
+            const campaignStatus = allProcessed ? "completed" : "running";
 
             await campaignRepository.update(campaignId, {
               sent_count: counts.completed,
-              failed_count: counts.failed,
+              failed_count: totalFailed,
               delivered_count: deliveredCount,
               read_count: readCount,
               status: campaignStatus,
             });
 
-            const progressPercent = counts.total > 0 ? Math.round((processedJobs / counts.total) * 100) : 0;
+            const processedIncludingPreflight = processedJobs + preflightFailed;
+            const progressPercent = totalContacts > 0 ? Math.round((processedIncludingPreflight / totalContacts) * 100) : 0;
 
             if (io) {
-              if (processedJobs === counts.total) {
+              if (allProcessed) {
                 io.emit("campaign_complete", {
                   campaignId,
                   sentCount: counts.completed,
-                  failedCount: counts.failed,
-                  total: counts.total,
+                  failedCount: totalFailed,
+                  total: totalContacts,
                 });
               } else {
                 io.emit("campaign_progress", {
@@ -190,7 +211,7 @@ const registerHandlers = () => {
               io.emit("campaign_update", {
                 campaignId,
                 sentCount: counts.completed,
-                failedCount: counts.failed,
+                failedCount: totalFailed,
                 deliveredCount: deliveredCount,
                 readCount: readCount,
                 status: campaignStatus,

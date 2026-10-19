@@ -10,8 +10,15 @@ const sendBulk = async (req, res) => {
   const io = req.app.get("io");
   const { phones, templateName, message, campaignName, type = "template", params = [], mediaUrl = "", scheduledAt = null } = req.body;
 
-  if (!phones || phones.length === 0) {
+  const MAX_BULK_RECIPIENTS = 20000;
+  if (!Array.isArray(phones) || phones.length === 0) {
     return res.status(400).json({ error: "No phone numbers provided" });
+  }
+
+  if (phones.length > MAX_BULK_RECIPIENTS) {
+    return res.status(400).json({
+      error: `Too many recipients in a single campaign (${phones.length}). Maximum is ${MAX_BULK_RECIPIENTS}; split into multiple campaigns.`,
+    });
   }
 
   if (type === "template" && !templateName) {
@@ -97,6 +104,29 @@ const sendBulk = async (req, res) => {
     }
   }
 
+  // Load explicit opt-outs once so we can exclude them for every message type
+  // (compliance: never message a number that has opted out).
+  const optedOutSet = new Set();
+  if (cleanDbPhones.length > 0) {
+    try {
+      const variants = Array.from(new Set(
+        cleanDbPhones.flatMap((p) => {
+          const bare = p.replace(/^\+/, "");
+          return [p, bare, `+${bare}`];
+        })
+      ));
+      const { data: optRows } = await supabase
+        .from("opt_outs")
+        .select("phone")
+        .in("phone", variants);
+      (optRows || []).forEach((o) => {
+        if (o.phone) optedOutSet.add(o.phone.replace(/^\+/, ""));
+      });
+    } catch (optErr) {
+      logger.warn("Could not load opt-out list for bulk send (table may not exist yet):", { error: optErr.message });
+    }
+  }
+
   let immediateFailures = 0;
   const jobsToInsert = [];
 
@@ -144,8 +174,10 @@ const sendBulk = async (req, res) => {
     const contact = contactMap[formatted];
     const contactName = contact?.name || "Customer";
 
-    // Exclude deactivated/opted-out contacts (KI-012)
-    if (contact && contact.is_active === false) {
+    // Exclude deactivated or explicitly opted-out contacts, for every message
+    // type (KI-012 + opt-out compliance).
+    const isOptedOut = optedOutSet.has(formatted.replace(/^\+/, ""));
+    if ((contact && contact.is_active === false) || isOptedOut) {
       immediateFailures++;
       logger.warn(`Phone number campaign send skipped: contact is inactive/opted-out: ${formatted}`);
 

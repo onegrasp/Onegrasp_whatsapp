@@ -3,29 +3,13 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import "./index.css";
 
-// Production Anti-Tampering & Security Hardening
+// Suppress verbose console output in production. (Note: blocking DevTools /
+// right-click was removed — client code is always inspectable, so it added no
+// security while harming debugging and accessibility.)
 if (import.meta.env.PROD) {
-  // Suppress verbose console debug output in browser developer tools
   console.log = () => {};
   console.debug = () => {};
   console.info = () => {};
-
-  // Prevent keyboard shortcuts for Inspect Element / DevTools (F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U)
-  window.addEventListener("keydown", (e) => {
-    if (
-      e.key === "F12" ||
-      (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "J" || e.key === "j" || e.key === "C" || e.key === "c")) ||
-      (e.ctrlKey && (e.key === "U" || e.key === "u"))
-    ) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  });
-
-  // Block right-click context menu inspect element shortcut
-  window.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-  });
 }
 
 class ErrorBoundary extends React.Component {

@@ -1,5 +1,11 @@
 const supabase = require("../config/supabase");
 
+// Strip characters that are significant in PostgREST filter grammar so raw user
+// input (search terms, set names) cannot inject extra filter conditions into an
+// `.or()` / `.ilike()` expression.
+const sanitizeFilterValue = (value) =>
+  String(value == null ? "" : value).replace(/[,()*:"\\{}]/g, " ").trim();
+
 const contactRepository = {
   async upsert(phone, name, label = "none") {
     const cleanLabel = label && label !== "all" ? label.trim().toLowerCase().replace(/\s+/g, "_") : "none";
@@ -49,14 +55,15 @@ const contactRepository = {
       .is("deleted_at", null);
 
     if (search) {
-      query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
+      const s = sanitizeFilterValue(search);
+      if (s) query = query.or(`name.ilike.%${s}%,phone.ilike.%${s}%`);
     }
 
     if (set && set !== "all") {
-      const cleanSet = set.trim().toLowerCase().replace(/\s+/g, "_");
-      query = query.or(`label.eq.${cleanSet},label.eq.${set},tags.cs.{${cleanSet}},tags.cs.{${set}}`);
+      const cleanSet = sanitizeFilterValue(set).toLowerCase().replace(/\s+/g, "_");
+      if (cleanSet) query = query.or(`label.eq.${cleanSet},tags.cs.{${cleanSet}}`);
     } else if (label && label !== "all") {
-      query = query.eq("label", label);
+      query = query.eq("label", sanitizeFilterValue(label));
     }
 
     try {
@@ -271,10 +278,11 @@ const contactRepository = {
 
   async deactivateByPhone(phone) {
     const clean = phone.replace(/^\+/, "");
+    const variants = Array.from(new Set([phone, clean, `+${clean}`]));
     const { data, error } = await supabase
       .from("contacts")
       .update({ is_active: false })
-      .or(`phone.eq.${phone},phone.eq.${clean},phone.eq.+${clean}`);
+      .in("phone", variants);
 
     try {
       await supabase.from("opt_outs").upsert({ phone, reason: "user_opt_out" }, { onConflict: "phone" });
@@ -287,12 +295,13 @@ const contactRepository = {
   async isOptedOut(phone) {
     try {
       const clean = phone.replace(/^\+/, "");
+      const variants = Array.from(new Set([phone, clean, `+${clean}`]));
       const { data } = await supabase
         .from("opt_outs")
         .select("id")
-        .or(`phone.eq.${phone},phone.eq.${clean},phone.eq.+${clean}`)
-        .maybeSingle();
-      return Boolean(data);
+        .in("phone", variants)
+        .limit(1);
+      return Array.isArray(data) && data.length > 0;
     } catch (e) {
       return false;
     }

@@ -1,6 +1,8 @@
 # WA Bulk — WhatsApp Campaign Manager
 
-A lightweight self-hosted WhatsApp bulk messaging system built with the Meta WhatsApp Cloud API. Supports bulk campaigns, real-time chat, delivery tracking, and contact management.
+A self-hosted WhatsApp bulk messaging system that sends via **Twilio** and/or the **Meta WhatsApp Cloud API**, backed by **Supabase (Postgres)**. Supports bulk campaigns, real-time chat, delivery tracking, and contact management.
+
+> **Note:** Earlier revisions of this README described MongoDB and a Meta-only setup. The current stack is Supabase + Twilio/Meta — see the tables below.
 
 ---
 
@@ -21,17 +23,17 @@ A lightweight self-hosted WhatsApp bulk messaging system built with the Meta Wha
 |---|---|
 | Frontend | React + Vite + Tailwind CSS |
 | Backend | Node.js + Express |
-| Database | MongoDB + Mongoose |
+| Database | Supabase (Postgres) |
 | Real-Time | Socket.io |
-| Messaging | Meta WhatsApp Cloud API |
+| Messaging | Twilio WhatsApp and/or Meta WhatsApp Cloud API |
 
 ---
 
 ## Prerequisites
 
 1. **Node.js** v18+
-2. **MongoDB Atlas** account (free tier works)
-3. **Meta Developer Account** with a WhatsApp Business App
+2. **Supabase** project (run the SQL in `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`)
+3. A WhatsApp sender: a **Twilio** account with WhatsApp enabled, and/or a **Meta Developer Account** with a WhatsApp Business App
 
 ---
 
@@ -73,17 +75,30 @@ cd backend
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit `.env` — see [`backend/.env.example`](backend/.env.example) for the full, documented list. The security-critical variables are:
 
 ```env
-PORT=5000
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/whatsapp_system
-ACCESS_TOKEN=your_meta_permanent_access_token
-PHONE_NUMBER_ID=your_phone_number_id
-WABA_ID=your_waba_id
-WEBHOOK_VERIFY_TOKEN=any_secret_string_you_choose
+# Required in production — the server refuses to start without these:
+JWT_SECRET=<48+ random bytes; generate with node -e "console.log(require('crypto').randomBytes(48).toString('hex'))">
+ADMIN_PASSWORD=<your admin console password>
+CRON_SECRET=<random string; also used to authorize the queue cron>
+
+# Database (use the Supabase SERVICE ROLE key server-side):
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_KEY=<supabase service role key>
+
+# One or both providers:
+TWILIO_ACCOUNT_SID=...
+TWILIO_AUTH_TOKEN=...
+META_ACCESS_TOKEN=...
+META_PHONE_NUMBER_ID=...
+META_APP_SECRET=<required to verify inbound Meta webhooks>
+META_WEBHOOK_VERIFY_TOKEN=<your verify token>
+
 FRONTEND_URL=http://localhost:5173
 ```
+
+> **Security:** There are no default secrets. If `JWT_SECRET`/`ADMIN_PASSWORD` are unset the server will not start in production (and admin login is disabled in development). Set `META_APP_SECRET` so inbound Meta webhooks are signature-verified; Twilio webhook signature verification is on by default and can be toggled in Settings.
 
 ---
 
@@ -198,12 +213,15 @@ Mike Johnson,919999888777
    ```
 4. Update `vite.config.js` proxy target for production (or use env var in `api.js`)
 
-### Database (MongoDB Atlas)
+### Database (Supabase)
 
-1. Create a free M0 cluster at mongodb.com
-2. Create a database user
-3. Whitelist `0.0.0.0/0` for IP access (or specific IPs)
-4. Copy the connection string to `MONGODB_URI`
+1. Create a Supabase project
+2. Run `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql` in the SQL editor
+3. Copy the project URL to `SUPABASE_URL` and the **service role** key to `SUPABASE_KEY` (server-side only — never ship it to the browser)
+
+### Background worker & serverless note
+
+Bulk sends are queued to the `jobs` table and drained by a worker. On a long-running host (Render/Railway) the worker runs in-process. **On Vercel (serverless) the in-process worker does not run** — the included `vercel.json` registers a cron that calls `GET /api/jobs/process-queue` every minute. That endpoint requires `CRON_SECRET` (sent as `Authorization: Bearer <CRON_SECRET>`). Socket.io realtime also does not hold connections on serverless; use a long-running host if you need live updates.
 
 ---
 
