@@ -61,14 +61,10 @@ export default function Contacts() {
   const [filterSet, setFilterSet] = useState("all");
   const [filterLabel, setFilterLabel] = useState("all");
   const [setCounts, setSetCounts] = useState({});
-  const [customSets, setCustomSets] = useState(() => {
-    try {
-      const saved = localStorage.getItem("wa_custom_contact_sets");
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      return [];
-    }
-  });
+  // Sets are derived from the server (contact tags), not from browser storage,
+  // so they are consistent across devices/browsers. Session-created empty sets
+  // are held in state only until they have contacts assigned.
+  const [customSets, setCustomSets] = useState([]);
 
   // Modals & UI States
   const [showNewSetModal, setShowNewSetModal] = useState(false);
@@ -104,11 +100,9 @@ export default function Contacts() {
       const known = ["all", "test_contacts", "new_contacts", "none", "interested", "follow_up", "converted", "not_interested"];
       const dbCustom = Object.keys(counts).filter((k) => !known.includes(k));
 
-      setCustomSets((prev) => {
-        const merged = Array.from(new Set([...prev, ...dbCustom]));
-        localStorage.setItem("wa_custom_contact_sets", JSON.stringify(merged));
-        return merged;
-      });
+      // Server-derived sets are the source of truth; keep any session-only
+      // (not-yet-populated) set names from state, but never read/write localStorage.
+      setCustomSets((prev) => Array.from(new Set([...prev, ...dbCustom])));
     } catch (err) {
       console.error("Failed to load contact sets:", err);
     }
@@ -182,11 +176,7 @@ export default function Contacts() {
       if (selectedIds.length > 0) {
         await assignContactSet({ contactIds: selectedIds, setName: cleanName });
       }
-      setCustomSets((prev) => {
-        const updated = Array.from(new Set([...prev, cleanName]));
-        localStorage.setItem("wa_custom_contact_sets", JSON.stringify(updated));
-        return updated;
-      });
+      setCustomSets((prev) => Array.from(new Set([...prev, cleanName])));
       setFilterSet(cleanName);
       setUploadTargetSet(cleanName);
       setSingleTargetSet(cleanName);

@@ -165,14 +165,28 @@ export default function BulkSender() {
   const loadContacts = async () => {
     setLoadingContacts(true);
     try {
-      const res = await getContacts({
+      // Load EVERY contact in the selected set by paging through all results.
+      // Previously this capped at 500, so campaigns to larger sets silently
+      // skipped everyone past the first 500. (The backend still enforces a
+      // per-campaign maximum and will return a clear error if a set is too big.)
+      const pageLimit = 1000;
+      const baseParams = {
         set: filterSet !== "all" ? filterSet : undefined,
         label: filterLabel !== "all" ? filterLabel : undefined,
-        limit: 500,
-      });
-      const list = res.data.contacts || [];
-      setContacts(list);
-      setSelectedPhones(list.map((c) => c.phone));
+      };
+      let page = 1;
+      let all = [];
+      let total = Infinity;
+      while (all.length < total && page <= 200) {
+        const res = await getContacts({ ...baseParams, page, limit: pageLimit });
+        const batch = res.data.contacts || [];
+        total = typeof res.data.total === "number" ? res.data.total : all.length + batch.length;
+        all = all.concat(batch);
+        if (batch.length < pageLimit) break;
+        page++;
+      }
+      setContacts(all);
+      setSelectedPhones(all.map((c) => c.phone));
     } catch (err) {
       console.error(err);
     } finally {

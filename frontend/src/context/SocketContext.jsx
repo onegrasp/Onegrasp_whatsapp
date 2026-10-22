@@ -13,6 +13,10 @@ export const SocketProvider = ({ children }) => {
       const rawUrl = import.meta.env.VITE_API_URL || "https://onegrasp-backend.onrender.com";
       const socketUrl = rawUrl.replace(/\/+$/, "").replace(/\/api\/v1$/, "");
 
+      // The backend now requires a valid admin JWT to open a socket, so send the
+      // session token on the handshake.
+      const token = sessionStorage.getItem("token") || localStorage.getItem("token");
+
       s = io(socketUrl, {
         transports: ["websocket", "polling"],
         reconnection: true,
@@ -20,6 +24,7 @@ export const SocketProvider = ({ children }) => {
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         timeout: 20000,
+        auth: { token },
       });
 
       s.on("connect", () => {

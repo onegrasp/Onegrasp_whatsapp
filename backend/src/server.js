@@ -3,6 +3,7 @@ const env = require("./config/env");
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const { Server } = require("socket.io");
 const logger = require("./utils/logger");
 
@@ -85,6 +86,23 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
     credentials: true,
   },
+});
+
+// Authenticate socket connections. Without this, any client that can reach the
+// server receives every broadcast event (live chats, campaign progress). Only a
+// client presenting a valid admin JWT may connect.
+io.use((socket, next) => {
+  try {
+    const bearer = (socket.handshake.headers?.authorization || "").replace(/^Bearer\s+/i, "");
+    const token = socket.handshake.auth?.token || bearer;
+    if (!token) {
+      return next(new Error("unauthorized"));
+    }
+    socket.user = jwt.verify(token, env.JWT_SECRET);
+    return next();
+  } catch (err) {
+    return next(new Error("unauthorized"));
+  }
 });
 
 app.set("io", io);

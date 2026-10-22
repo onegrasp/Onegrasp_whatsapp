@@ -37,6 +37,8 @@ if (!ADMIN_PASSWORD) {
     throw new Error("ADMIN_PASSWORD is required in production. Refusing to start without an admin password.");
   }
   console.warn("⚠️ ADMIN_PASSWORD not set — admin login is disabled until it is configured.");
+} else if (isProduction && ADMIN_PASSWORD.length < 12) {
+  console.warn("⚠️ ADMIN_PASSWORD is short (<12 characters). Use a long, random password for the single-admin console.");
 }
 
 module.exports = {
