@@ -141,12 +141,19 @@ const templateService = {
           return { type: "QUICK_REPLY", title: b.text, id: b.text };
         }
       });
-      types["twilio/card"] = {
-        title: template.name || "Message",
+      // Media header + body + buttons must use `whatsapp/card`, which carries a
+      // real `body` (up to 1024 chars), an optional `footer`, a `media` header
+      // (array of URLs), and `actions`. The old `twilio/card` has only a short
+      // title/subtitle and NO body, so the full message text was silently
+      // dropped and recipients received just the template name.
+      const cardType = {
         body: template.body,
-        media: [template.header_image_url || "https://wcnfmuxtygwejrhlqqvu.supabase.co/storage/v1/object/public/whatsapp-media/welcome-media__1784288927046.jpg"],
         actions: actions,
       };
+      if (template.header_image_url) {
+        cardType.media = [template.header_image_url];
+      }
+      types["whatsapp/card"] = cardType;
     } else if (template.buttons && template.buttons.length > 0) {
       const actions = template.buttons.map((b) => {
         if (b.type === "URL") {
