@@ -8,7 +8,10 @@ console.log("[API] Connecting to backend at:", baseURL);
 
 const api = axios.create({
   baseURL,
-  timeout: 30000,
+  // The backend (Render free tier) sleeps when idle and can take up to ~2 min
+  // to wake on the first request. A short timeout turns that cold start into a
+  // false "unable to connect" error, so we wait it out.
+  timeout: 120000,
 });
 
 // Attach JWT token to every request if it exists in session or local storage
@@ -55,6 +58,15 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// Fire a warm-up request as soon as the app loads so the backend starts waking
+// from its idle sleep while the user reads the login screen / types — by the
+// time they submit, the cold start is usually already done. Fire-and-forget.
+try {
+  api.get("/health").catch(() => {});
+} catch (_) {
+  // ignore — this is a best-effort warm-up only
+}
 
 // Auth
 export const login = (password) => api.post("/auth/login", { password });
