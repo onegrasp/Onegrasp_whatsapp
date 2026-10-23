@@ -35,6 +35,31 @@ const hasConsent = (c) => c.consentStatus === "opted_in";
 // (when required) only those with recorded consent.
 const isEligible = (c, requireConsent) => !isOptedOut(c) && !c.invalidReason && (!requireConsent || hasConsent(c));
 
+// Explains, reason by reason, why none of the selected contacts can be sent
+// the campaign, and what to change.
+function NobodyToSend({ pre }) {
+  const plural = (n, one, many) => `${formatNumber(n)} ${n === 1 ? one : many}`;
+  const reasons = [
+    pre.recentlyContacted > 0 &&
+      `${plural(pre.recentlyContacted, "contact was", "contacts were")} already sent a campaign in the last ${plural(pre.cooldownDays, "day", "days")}. To send to them again, set "Skip contacts messaged by a campaign in the last … days" under Recipient safeguards to 0.`,
+    pre.optedOut > 0 && `${plural(pre.optedOut, "contact has", "contacts have")} opted out (replied STOP) and can't be messaged.`,
+    pre.noConsent > 0 &&
+      `${plural(pre.noConsent, "contact has", "contacts have")} no recorded consent. Untick "Only contacts with recorded consent", or record their consent on the Contacts page.`,
+    pre.invalidFormat > 0 && `${plural(pre.invalidFormat, "number is", "numbers are")} not a valid phone number.`,
+  ].filter(Boolean);
+
+  return (
+    <div>
+      <p className="font-medium">None of the selected contacts can be sent this campaign:</p>
+      <ul className="mt-1 list-disc space-y-1 pl-4">
+        {reasons.map((r) => (
+          <li key={r}>{r}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // Rows for the pre-send summary.
 function PreflightSummary({ pre, count, type, templateLabel, campaignName, hasImage, splitChoice }) {
   const skipped = [
@@ -430,7 +455,7 @@ export default function BulkSender() {
     }
 
     if (pre.willSend === 0) {
-      setError("Nobody left to send to: every selected contact is opted out, recently messaged, or without consent.");
+      setError(<NobodyToSend pre={pre} />);
       return;
     }
 
