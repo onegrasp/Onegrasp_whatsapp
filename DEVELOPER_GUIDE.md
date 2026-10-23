@@ -259,7 +259,8 @@ conversations, and messages together (always stored in `+E.164` format).
 **Important:** there's a SQL function `pull_pending_job()` that the worker relies on, and
 `get_campaign_job_counts()` for fast campaign stats. These live in the schema/migration SQL —
 if you set up a fresh database, run `supabase_schema.sql`, then `migrations.sql`, then
-`migrations/003_enable_rls.sql`.
+`migrations/003_enable_rls.sql`, then `migrations/004_message_media.sql` (stores sent images on
+`messages.media_url` so they show in Chats).
 
 ---
 
@@ -333,7 +334,7 @@ npm run dev                 # starts on http://localhost:5173
 - The frontend dev server proxies `/api` to `http://localhost:5000` (see `vite.config.js`).
 - For webhooks locally, expose the backend with a tunnel (e.g. `npx ngrok http 5000`) and point
   Twilio/Meta at the public URL.
-- Database: run `supabase_schema.sql`, then `migrations.sql` in the Supabase SQL editor first.
+- Database: run `supabase_schema.sql`, `migrations.sql`, `migrations/003_enable_rls.sql` and `migrations/004_message_media.sql` in the Supabase SQL editor first.
 
 ---
 

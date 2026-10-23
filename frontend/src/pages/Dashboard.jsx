@@ -1,50 +1,48 @@
-import { useEffect, useState } from "react";
-import {
-  Users,
-  MessageSquare,
-  CheckCheck,
-  Eye,
-  XCircle,
-  TrendingUp,
-  ArrowDownLeft,
-} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { Megaphone } from "lucide-react";
 import { getStats, getCampaigns } from "../services/api";
+import { EmptyState, ErrorState, LoadingRows, Page, PageHeader, StatusBadge } from "../components/ui";
+import { formatDateTime, formatNumber } from "../lib/format";
 
-const StatCard = ({ icon: Icon, label, value, color, sub }) => (
-  <div className="card p-5">
-    <div className="flex items-start justify-between">
-      <div>
-        <p className="text-slate-400 text-xs font-medium uppercase tracking-wider">{label}</p>
-        <p className={`text-3xl font-bold mt-1 ${color}`}>{value ?? "—"}</p>
-        {sub && <p className="text-slate-500 text-xs mt-1">{sub}</p>}
-      </div>
-      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${color} bg-current/10`}
-        style={{ backgroundColor: "rgba(255,255,255,0.05)" }}>
-        <Icon size={18} className={color} />
-      </div>
+function Metric({ label, value, detail, loading }) {
+  return (
+    <div className="bg-white px-5 py-4">
+      <p className="text-sm text-gray-500">{label}</p>
+      {loading ? (
+        <div className="mt-2 h-7 w-20 animate-pulse rounded bg-gray-100" />
+      ) : (
+        <p className="mt-1 text-2xl font-semibold tabular-nums text-gray-900">{value}</p>
+      )}
+      {detail && <p className="mt-1 text-xs text-gray-500">{detail}</p>}
     </div>
-  </div>
-);
+  );
+}
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [s, c] = await Promise.all([getStats(), getCampaigns()]);
+      setStats(s.data);
+      setCampaigns((c.data || []).slice(0, 5));
+    } catch (err) {
+      console.error(err);
+      setError("Dashboard data could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const [s, c] = await Promise.all([getStats(), getCampaigns()]);
-        setStats(s.data);
-        setCampaigns(c.data.slice(0, 5));
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
     load();
-  }, []);
+  }, [load]);
 
   const totalOutgoing = (stats?.sentMessages || 0) + (stats?.deliveredMessages || 0) + (stats?.failedMessages || 0);
   const effectiveDelivered = (stats?.deliveredMessages || 0) > 0
@@ -55,91 +53,90 @@ export default function Dashboard() {
     : 0;
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-xl font-bold text-slate-900">Dashboard</h1>
-        <p className="text-slate-500 text-sm mt-1">Overview of your WhatsApp campaigns</p>
-      </div>
+    <Page header={<PageHeader title="Dashboard" description="Messaging activity across all campaigns and chats." />}>
+      <div className="space-y-6">
+        {error && <ErrorState message={error} onRetry={load} />}
 
-      {/* Stats Grid */}
-      {loading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {Array(7).fill(0).map((_, i) => (
-            <div key={i} className="card p-5 animate-pulse">
-              <div className="h-4 bg-surface-hover rounded w-20 mb-2" />
-              <div className="h-8 bg-surface-hover rounded w-16" />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard icon={Users} label="Total Contacts" value={stats?.totalContacts} color="text-blue-400" />
-          <StatCard icon={MessageSquare} label="Total Messages" value={stats?.totalMessages} color="text-purple-400" />
-          <StatCard icon={TrendingUp} label="Delivered" value={stats?.deliveredMessages} color="text-wa-green" />
-          <StatCard icon={Eye} label="Read" value={stats?.readMessages} color="text-cyan-400" />
-          <StatCard icon={XCircle} label="Failed" value={stats?.failedMessages} color="text-red-400" />
-          <StatCard icon={ArrowDownLeft} label="Replies Received" value={stats?.incomingMessages} color="text-yellow-400" />
-          <StatCard
-            icon={CheckCheck}
-            label="Delivery Rate"
-            value={`${deliveryRate}%`}
-            color="text-wa-green"
-            sub="delivered + read"
-          />
-        </div>
-      )}
+        <section aria-label="Key metrics" className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-gray-200 bg-gray-200 sm:grid-cols-2 xl:grid-cols-4">
+          <Metric loading={loading} label="Contacts" value={formatNumber(stats?.totalContacts)} />
+          <Metric loading={loading} label="Messages" value={formatNumber(stats?.totalMessages)} detail="Sent and received" />
+          <Metric loading={loading} label="Delivery rate" value={`${deliveryRate}%`} detail="Delivered or read, of outgoing" />
+          <Metric loading={loading} label="Replies received" value={formatNumber(stats?.incomingMessages)} />
+        </section>
 
-      {/* Recent Campaigns */}
-      <div className="card overflow-hidden">
-        <div className="px-5 py-4 border-b border-surface-border">
-          <h2 className="text-sm font-semibold text-slate-900">Recent Campaigns</h2>
-        </div>
-        {campaigns.length === 0 ? (
-          <div className="p-8 text-center text-slate-500 text-sm">
-            No campaigns yet. Start by sending a bulk campaign.
+        <section aria-label="Message status" className="panel">
+          <h2 className="section-title border-b border-gray-200 px-5 py-3">Message status</h2>
+          <dl className="grid grid-cols-3 divide-x divide-gray-200">
+            {[
+              { label: "Delivered", value: stats?.deliveredMessages },
+              { label: "Read", value: stats?.readMessages },
+              { label: "Failed", value: stats?.failedMessages, danger: true },
+            ].map((item) => (
+              <div key={item.label} className="px-5 py-3">
+                <dt className="text-xs text-gray-500">{item.label}</dt>
+                <dd className={`mt-0.5 text-lg font-semibold tabular-nums ${item.danger && item.value > 0 ? "text-red-600" : "text-gray-900"}`}>
+                  {loading ? "—" : formatNumber(item.value)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
+        <section className="panel overflow-hidden">
+          <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
+            <h2 className="section-title">Recent campaigns</h2>
+            <Link to="/campaigns" className="text-sm font-medium text-brand-700 hover:text-brand-800">
+              View all
+            </Link>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-surface-border">
-                  <th className="text-left px-5 py-3 text-slate-400 font-medium">Campaign</th>
-                  <th className="text-left px-5 py-3 text-slate-400 font-medium">Total</th>
-                  <th className="text-left px-5 py-3 text-slate-400 font-medium">Sent</th>
-                  <th className="text-left px-5 py-3 text-slate-400 font-medium">Delivered</th>
-                  <th className="text-left px-5 py-3 text-slate-400 font-medium">Read</th>
-                  <th className="text-left px-5 py-3 text-slate-400 font-medium">Failed</th>
-                  <th className="text-left px-5 py-3 text-slate-400 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {campaigns.map((c) => (
-                  <tr key={c._id} className="border-b border-surface-border/50 hover:bg-surface-hover/50">
-                    <td className="px-5 py-3 text-slate-900 font-medium">{c.name}</td>
-                    <td className="px-5 py-3 text-slate-300">{c.totalContacts}</td>
-                    <td className="px-5 py-3 text-slate-300">{c.sentCount}</td>
-                    <td className="px-5 py-3 text-wa-green">{c.deliveredCount}</td>
-                    <td className="px-5 py-3 text-cyan-400">{c.readCount}</td>
-                    <td className="px-5 py-3 text-red-400">{c.failedCount}</td>
-                    <td className="px-5 py-3">
-                      <span className={`badge ${
-                        c.status === "completed"
-                          ? "bg-wa-green/10 text-wa-green"
-                          : c.status === "running"
-                          ? "bg-yellow-400/10 text-yellow-400"
-                          : "bg-red-400/10 text-red-400"
-                      }`}>
-                        {c.status}
-                      </span>
-                    </td>
+          {!loading && campaigns.length === 0 ? (
+            <EmptyState
+              icon={Megaphone}
+              title="No campaigns yet"
+              description="Campaigns you send from Bulk send appear here."
+              action={<Link to="/bulk" className="btn btn-primary btn-sm">New campaign</Link>}
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Campaign</th>
+                    <th>Status</th>
+                    <th className="text-right">Recipients</th>
+                    <th className="text-right">Sent</th>
+                    <th className="text-right">Delivered</th>
+                    <th className="text-right">Read</th>
+                    <th className="text-right">Failed</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <LoadingRows rows={3} cols={7} />
+                  ) : (
+                    campaigns.map((c) => (
+                      <tr key={c._id}>
+                        <td>
+                          <p className="font-medium text-gray-900">{c.name}</p>
+                          <p className="text-xs text-gray-500">{formatDateTime(c.createdAt)}</p>
+                        </td>
+                        <td>
+                          <StatusBadge kind="campaign" status={c.status} />
+                        </td>
+                        <td className="num text-right">{formatNumber(c.totalContacts)}</td>
+                        <td className="num text-right">{formatNumber(c.sentCount || 0)}</td>
+                        <td className="num text-right">{formatNumber(c.deliveredCount || 0)}</td>
+                        <td className="num text-right">{formatNumber(c.readCount || 0)}</td>
+                        <td className={`num text-right ${c.failedCount > 0 ? "text-red-600" : ""}`}>{formatNumber(c.failedCount || 0)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
-    </div>
+    </Page>
   );
 }

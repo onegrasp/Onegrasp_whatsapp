@@ -13,7 +13,7 @@ const getConversations = async (req, res, next) => {
 const getMessages = async (req, res, next) => {
   try {
     const { phone } = req.params;
-    const { page = 1, limit = 50 } = req.query;
+    const { page = 1, limit = 100 } = req.query;
     const result = await messageService.getMessages(phone, page, limit);
     res.json(result);
   } catch (err) {

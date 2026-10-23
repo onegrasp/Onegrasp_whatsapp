@@ -1,5 +1,5 @@
 const eventBus = require("../events/eventBus");
-const { verifySignature, normalizePayload } = require("../integrations/twilio/webhook.service");
+const { normalizePayload } = require("../integrations/twilio/webhook.service");
 const { mapStatus } = require("../integrations/twilio/status.service");
 const { mapTwilioError } = require("../integrations/twilio/errors");
 const { verifyMetaWebhook, verifyMetaSignature, parseMetaWebhookBody } = require("../integrations/meta/webhook.service");
@@ -66,13 +66,10 @@ const handleMetaWebhookEvent = async (req, res, next) => {
   }
 };
 
+// Twilio routes are guarded by the validateTwilioSignature middleware, so the
+// handlers below can trust the payload.
 const handleTwilioIncomingMessage = async (req, res, next) => {
   try {
-    const isSignatureValid = await verifySignature(req);
-    if (!isSignatureValid) {
-      return res.status(403).send("Forbidden: Invalid Twilio signature");
-    }
-
     const payload = normalizePayload(req.body);
     logger.info("Normalizing incoming message payload for event publication", { messageSid: payload.messageSid });
 
@@ -105,11 +102,6 @@ const handleTwilioIncomingMessage = async (req, res, next) => {
 
 const handleTwilioStatusUpdate = async (req, res, next) => {
   try {
-    const isSignatureValid = await verifySignature(req);
-    if (!isSignatureValid) {
-      return res.status(403).send("Forbidden: Invalid Twilio signature");
-    }
-
     const payload = normalizePayload(req.body);
     logger.info("Normalizing status update payload for event publication", { messageSid: payload.messageSid, status: payload.messageStatus });
 

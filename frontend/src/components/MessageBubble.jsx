@@ -1,38 +1,58 @@
-import { Check, CheckCheck, AlertCircle, Clock, FileText } from "lucide-react";
+import { useState } from "react";
+import { AlertCircle, Check, CheckCheck, Clock, FileText, Paperclip } from "lucide-react";
+import { formatTime } from "../lib/format";
 
-const StatusIcon = ({ status, errorDetails }) => {
-  if (status === "read") return <CheckCheck size={13} className="text-[#53bdeb] shrink-0" title="Read" />;
-  if (status === "delivered") return <CheckCheck size={13} className="text-slate-400/80 shrink-0" title="Delivered" />;
-  if (["sent", "accepted"].includes(status)) return <Check size={13} className="text-slate-400/80 shrink-0" title="Sent" />;
-  if (["pending", "queued", "sending"].includes(status)) return <Clock size={11} className="text-slate-400/60 shrink-0 animate-pulse" title="Sending..." />;
-  if (["failed", "undelivered"].includes(status)) {
+const STATUS_ICON = {
+  read: { Icon: CheckCheck, className: "text-[#53bdeb]", label: "Read" },
+  delivered: { Icon: CheckCheck, className: "text-gray-400", label: "Delivered" },
+  sent: { Icon: Check, className: "text-gray-400", label: "Sent" },
+  accepted: { Icon: Check, className: "text-gray-400", label: "Sent" },
+  pending: { Icon: Clock, className: "text-gray-400", label: "Sending" },
+  queued: { Icon: Clock, className: "text-gray-400", label: "Sending" },
+  sending: { Icon: Clock, className: "text-gray-400", label: "Sending" },
+  failed: { Icon: AlertCircle, className: "text-red-600", label: "Failed" },
+  undelivered: { Icon: AlertCircle, className: "text-red-600", label: "Not delivered" },
+};
+
+function StatusIcon({ status, errorDetails }) {
+  const meta = STATUS_ICON[status];
+  if (!meta) return null;
+  const { Icon, className, label } = meta;
+  const title = errorDetails && (status === "failed" || status === "undelivered") ? `${label}: ${errorDetails}` : label;
+  return (
+    <span title={title} className="inline-flex">
+      <Icon size={14} className={className} aria-hidden="true" />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
+function Attachment({ url }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) {
     return (
-      <AlertCircle
-        size={13}
-        className="text-red-500 shrink-0 cursor-help animate-pulse"
-        title={errorDetails || `Message failed: ${status}`}
-      />
+      <a href={url} target="_blank" rel="noreferrer" className="mb-1 flex items-center gap-1.5 text-13 text-brand-700 underline">
+        <Paperclip size={13} aria-hidden="true" />
+        Open attachment
+      </a>
     );
   }
-  return null;
-};
-
-const formatTime = (ts) => {
-  if (!ts) return "";
-  const d = new Date(ts);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-};
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="mb-1.5 block overflow-hidden rounded-md bg-black/5">
+      <img src={url} alt="Attachment" loading="lazy" onError={() => setBroken(true)} className="max-h-80 w-full object-contain" />
+    </a>
+  );
+}
 
 export default function MessageBubble({ message }) {
   const isOutgoing = message.direction === "outgoing";
   const rawText = message.text || "";
-  const isRawTemplate = rawText.startsWith("[Template:");
   const mediaUrl = message.mediaUrl || message.media_url || message.media;
-  
+  const failed = message.status === "failed" || message.status === "undelivered";
+
   let templateId = message.templateName || "";
   let displayText = rawText;
-
-  if (isRawTemplate) {
+  if (rawText.startsWith("[Template:")) {
     templateId = rawText.replace(/^\[Template:\s*/i, "").replace(/\]$/, "").trim();
     displayText = "";
   } else if (rawText.includes("[ID:")) {
@@ -42,41 +62,25 @@ export default function MessageBubble({ message }) {
   }
 
   return (
-    <div className={`flex ${isOutgoing ? "justify-end" : "justify-start"} mb-1.5`}>
+    <div className={`flex ${isOutgoing ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[70%] px-3.5 py-2 rounded-2xl text-slate-800 text-[13px] leading-relaxed shadow-sm transition-all relative ${
-          isOutgoing
-            ? "bg-[#d9fdd3] border border-[#c3f0bb] text-slate-900 rounded-tr-none"
-            : "bg-white border border-slate-100 text-slate-900 rounded-tl-none"
+        className={`max-w-[85%] rounded-lg px-3 py-2 text-sm text-gray-900 shadow-sm sm:max-w-[70%] ${
+          isOutgoing ? "rounded-tr-sm bg-[#d9fdd3]" : "rounded-tl-sm bg-white ring-1 ring-gray-200"
         }`}
       >
-        {mediaUrl ? (
-          <div className="my-1.5 overflow-hidden rounded-xl bg-slate-900/5 border border-slate-200/60">
-            <img
-              src={mediaUrl}
-              alt="Campaign Media"
-              className="w-full h-auto max-h-[420px] object-contain rounded-xl"
-            />
-          </div>
-        ) : null}
-
-        {displayText ? (
-          <p className="break-words font-medium whitespace-pre-wrap">{displayText}</p>
-        ) : null}
-
-        {templateId ? (
-          <div className={`${displayText || mediaUrl ? "mt-1.5" : ""} flex items-center gap-1.5 text-[11px] font-mono bg-emerald-500/10 text-emerald-800 border border-emerald-500/20 rounded-lg px-2.5 py-1`}>
-            <FileText size={12} className="text-emerald-600 shrink-0" />
-            <span className="truncate">Template ID: <strong className="font-bold">{templateId}</strong></span>
-          </div>
-        ) : null}
-
-        <div className={`flex items-center gap-1.5 mt-1 justify-end select-none`}>
-          <span className="text-[10px] text-slate-400 font-semibold">
-            {formatTime(message.timestamp)}
-          </span>
+        {mediaUrl && <Attachment url={mediaUrl} />}
+        {displayText && <p className="whitespace-pre-wrap break-words leading-relaxed">{displayText}</p>}
+        {templateId && (
+          <p className={`flex items-center gap-1 text-xs text-gray-500 ${displayText || mediaUrl ? "mt-1" : ""}`}>
+            <FileText size={12} aria-hidden="true" />
+            <span className="truncate">Template {templateId}</span>
+          </p>
+        )}
+        <div className="mt-1 flex items-center justify-end gap-1 text-2xs text-gray-500">
+          <span>{formatTime(message.timestamp)}</span>
           {isOutgoing && <StatusIcon status={message.status} errorDetails={message.errorDetails} />}
         </div>
+        {isOutgoing && failed && message.errorDetails && <p className="mt-1 text-xs text-red-700">{message.errorDetails}</p>}
       </div>
     </div>
   );

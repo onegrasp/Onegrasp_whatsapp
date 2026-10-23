@@ -4,6 +4,7 @@ const logger = require("../utils/logger");
 const { validateAndFormatE164 } = require("../utils/phone");
 const { resolveTemplateText, validateTemplateParameters } = require("../utils/templateHelper");
 const templateRepository = require("../repositories/templateRepository");
+const messageRepository = require("../repositories/messageRepository");
 
 // Send bulk messages (Queued campaign execution via Supabase jobs table)
 const sendBulk = async (req, res) => {
@@ -294,8 +295,8 @@ const sendSingle = async (req, res) => {
   const params = Array.isArray(rawBody.params) ? rawBody.params : (rawBody.parameters || []);
   const mediaUrl = rawBody.mediaUrl || rawBody.media_url || rawBody.imageUrl || "";
 
-  if (!phone || (!message && !templateName)) {
-    return res.status(400).json({ error: "Phone and message/template are required" });
+  if (!phone || (!message && !templateName && !mediaUrl)) {
+    return res.status(400).json({ error: "Phone and a message, template or attachment are required" });
   }
 
   // 1. Phone Validation
@@ -346,53 +347,37 @@ const sendSingle = async (req, res) => {
     } catch (e) {}
 
     let templateDisplayText = message;
-    if (type === "template" || !templateDisplayText || templateDisplayText.startsWith("HX") || templateDisplayText.startsWith("[Template:")) {
+    const needsTemplateText = type === "template" ||
+      (templateDisplayText && (templateDisplayText.startsWith("HX") || templateDisplayText.startsWith("[Template:")));
+    if (needsTemplateText) {
       templateDisplayText = await resolveTemplateText(templateName, params, message || "");
     }
 
     const messageSid = result?.messages?.[0]?.id || result?.sid || `SM_${Date.now()}`;
     const timestamp = new Date().toISOString();
 
-    let savedMsg = {
-      id: `msg_${Date.now()}`,
+    const record = {
       phone: formatted,
       contact_name: contactName,
-      text: templateDisplayText,
+      text: templateDisplayText || "",
       type,
       direction: "outgoing",
       status: "sent",
       message_id: messageSid,
       template_name: templateName || "",
+      media_url: mediaUrl || "",
       timestamp,
     };
+    let savedMsg = { id: `msg_${Date.now()}`, ...record };
 
     try {
-      const { data: dbSaved, error: insertError } = await supabase
-        .from("messages")
-        .insert([
-          {
-            phone: formatted,
-            contact_name: contactName,
-            text: templateDisplayText,
-            type,
-            direction: "outgoing",
-            status: "sent",
-            message_id: messageSid,
-            template_name: templateName || "",
-            timestamp,
-          },
-        ])
-        .select()
-        .single();
-      if (!insertError && dbSaved) {
-        savedMsg = dbSaved;
-      }
+      savedMsg = await messageRepository.create(record);
 
       try {
         await supabase.from("conversations").upsert({
           phone: formatted,
           contact_name: contactName || formatted,
-          last_message: savedMsg.text,
+          last_message: savedMsg.text || (mediaUrl ? "Image" : ""),
           last_direction: "outgoing",
           last_status: "sent",
           last_timestamp: timestamp,
@@ -412,6 +397,7 @@ const sendSingle = async (req, res) => {
         direction: savedMsg.direction,
         status: savedMsg.status,
         messageId: savedMsg.message_id || messageSid,
+        mediaUrl: mediaUrl || "",
         timestamp: savedMsg.timestamp,
       });
     }
@@ -429,27 +415,22 @@ const sendSingle = async (req, res) => {
         .eq("phone", formatted)
         .maybeSingle();
 
-      const failText = message || `[Template: ${templateName}]`;
+      const failText = message || (templateName ? `[Template: ${templateName}]` : "");
       const failTime = new Date().toISOString();
 
-      const { data: savedMsg } = await supabase
-        .from("messages")
-        .insert([
-          {
-            phone: formatted,
-            contact_name: contact?.name || "",
-            text: failText,
-            type,
-            direction: "outgoing",
-            status: "failed",
-            template_name: templateName || "",
-            error_details: errorMsg,
-            error_category: errorCategory,
-            timestamp: failTime,
-          },
-        ])
-        .select()
-        .single();
+      const savedMsg = await messageRepository.create({
+        phone: formatted,
+        contact_name: contact?.name || "",
+        text: failText,
+        type,
+        direction: "outgoing",
+        status: "failed",
+        template_name: templateName || "",
+        error_details: errorMsg,
+        error_category: errorCategory,
+        media_url: mediaUrl || "",
+        timestamp: failTime,
+      }).catch(() => null);
 
       // Update Conversation failure summary
       await supabase.from("conversations").upsert({
@@ -471,6 +452,8 @@ const sendSingle = async (req, res) => {
           direction: "outgoing",
           status: "failed",
           messageId: "",
+          mediaUrl: mediaUrl || "",
+          errorDetails: errorMsg,
           timestamp: failTime,
         });
       }

@@ -1,48 +1,93 @@
-import { useState, useEffect } from "react";
-import {
-  Megaphone,
-  TrendingUp,
-  CheckCheck,
-  Eye,
-  XCircle,
-  Clock,
-  ChevronDown,
-  ChevronUp,
-  AlertOctagon,
-} from "lucide-react";
+import { Fragment, useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { ChevronDown, ChevronRight, Megaphone } from "lucide-react";
 import { getCampaigns, getCampaignMessages } from "../services/api";
 import { useSocket } from "../context/SocketContext";
+import { EmptyState, ErrorState, LoadingRows, Page, PageHeader, Spinner, StatusBadge } from "../components/ui";
+import { formatDateTime, formatNumber } from "../lib/format";
 
-const STATUS_STYLES = {
-  completed: "bg-wa-green/10 text-wa-green",
-  running: "bg-yellow-400/10 text-yellow-400",
-  failed: "bg-red-400/10 text-red-400",
+const CAMPAIGN_LIMIT = 50; // the API returns the most recent 50
+
+const deliveryRateOf = (c) => {
+  const sent = c.sentCount || 0;
+  const failed = c.failedCount || 0;
+  const delivered = c.deliveredCount || 0;
+  const total = c.totalContacts || sent + failed || 1;
+  const effectiveDelivered = delivered > 0 ? delivered : Math.max(0, sent - failed);
+  return Math.min(100, Math.max(0, Math.round((effectiveDelivered / total) * 100)));
 };
+
+function CampaignLog({ loading, messages }) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 px-4 py-6 text-sm text-gray-500">
+        <Spinner /> Loading message log…
+      </div>
+    );
+  }
+  if (messages.length === 0) {
+    return <p className="px-4 py-6 text-sm text-gray-500">No messages recorded for this campaign yet.</p>;
+  }
+  return (
+    <div className="max-h-96 overflow-auto">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Contact</th>
+            <th>Phone</th>
+            <th>Status</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {messages.map((m) => (
+            <tr key={m._id}>
+              <td className="text-gray-900">{m.contactName || "—"}</td>
+              <td className="num whitespace-nowrap">{m.phone}</td>
+              <td>
+                <StatusBadge kind="message" status={m.status} />
+              </td>
+              <td className="max-w-md">
+                {m.status === "failed" || m.status === "undelivered" ? (
+                  <span className="text-red-700">{m.errorDetails || "Failed"}</span>
+                ) : (
+                  <span className="text-gray-400">—</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function Campaigns() {
   const { socket } = useSocket();
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expandedCampaignId, setExpandedCampaignId] = useState(null);
+  const [error, setError] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
   const [campaignMessages, setCampaignMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
-  const loadCampaigns = async () => {
+  const loadCampaigns = useCallback(async () => {
+    setError("");
     try {
       const res = await getCampaigns();
-      setCampaigns(res.data);
+      setCampaigns(res.data || []);
     } catch (err) {
       console.error(err);
+      setError("Campaigns could not be loaded.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadCampaigns();
-  }, []);
+  }, [loadCampaigns]);
 
-  // Socket.io for live status updates in the dashboard
   useEffect(() => {
     if (!socket) return;
 
@@ -64,240 +109,151 @@ export default function Campaigns() {
     };
 
     const handleStatusUpdate = ({ messageId, status, errorDetails }) => {
-      // If expanded campaign logs are open, update the rows dynamically
       setCampaignMessages((prev) =>
-        prev.map((m) =>
-          m.messageId === messageId
-            ? { ...m, status, ...(errorDetails && { errorDetails }) }
-            : m
-        )
+        prev.map((m) => (m.messageId === messageId ? { ...m, status, ...(errorDetails && { errorDetails }) } : m))
       );
     };
 
     socket.on("campaign_update", handleCampaignUpdate);
     socket.on("status_update", handleStatusUpdate);
-
     return () => {
       socket.off("campaign_update", handleCampaignUpdate);
       socket.off("status_update", handleStatusUpdate);
     };
   }, [socket]);
 
-  const handleToggleExpand = async (campaignId) => {
-    if (expandedCampaignId === campaignId) {
-      setExpandedCampaignId(null);
+  const toggleExpand = async (campaignId) => {
+    if (expandedId === campaignId) {
+      setExpandedId(null);
       setCampaignMessages([]);
       return;
     }
-    setExpandedCampaignId(campaignId);
+    setExpandedId(campaignId);
     setLoadingMessages(true);
     try {
       const res = await getCampaignMessages(campaignId);
-      setCampaignMessages(res.data);
+      setCampaignMessages(res.data || []);
     } catch (err) {
       console.error(err);
+      setCampaignMessages([]);
     } finally {
       setLoadingMessages(false);
     }
   };
 
   return (
-    <div className="h-full overflow-y-auto p-6 bg-slate-50">
-      <div className="mb-8">
-        <h1 className="text-xl font-bold text-slate-900">Campaigns</h1>
-        <p className="text-slate-500 text-sm mt-1">History of all bulk campaigns sent</p>
-      </div>
-
-      {loading ? (
-        <div className="grid gap-4">
-          {Array(4)
-            .fill(0)
-            .map((_, i) => (
-              <div key={i} className="card p-5 animate-pulse">
-                <div className="h-4 bg-surface-hover rounded w-48 mb-3" />
-                <div className="grid grid-cols-4 gap-4">
-                  {Array(4)
-                    .fill(0)
-                    .map((_, j) => (
-                      <div key={j} className="h-8 bg-surface-hover rounded" />
-                    ))}
-                </div>
-              </div>
-            ))}
-        </div>
-      ) : campaigns.length === 0 ? (
-        <div className="card p-12 text-center bg-white shadow-sm rounded-2xl">
-          <Megaphone size={32} className="text-slate-400 mx-auto mb-3" />
-          <p className="text-slate-600 text-sm font-semibold">No campaigns yet.</p>
-          <p className="text-slate-400 text-xs mt-1">
-            Send your first bulk campaign from the Bulk Send page.
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {campaigns.map((c) => {
-            const isExpanded = expandedCampaignId === c._id;
-            const sent = c.sentCount || 0;
-            const failed = c.failedCount || 0;
-            const delivered = c.deliveredCount || 0;
-            const total = c.totalContacts || (sent + failed) || 1;
-
-            const effectiveDelivered = delivered > 0 ? delivered : Math.max(0, sent - failed);
-            const deliveryRate = total > 0
-              ? Math.min(100, Math.max(0, Math.round((effectiveDelivered / total) * 100)))
-              : 0;
-
-            const deliveredDisplay = delivered > 0 
-              ? delivered 
-              : (sent > 0 && failed === 0 ? `${sent} (Sent)` : 0);
-
-            return (
-              <div key={c._id} className="card p-5 bg-white shadow-sm rounded-2xl border border-slate-100 flex flex-col gap-4">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <h3 className="text-slate-900 font-bold text-sm">{c.name}</h3>
-                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      <span className={`badge text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${STATUS_STYLES[c.status]}`}>
-                        {c.status}
-                      </span>
-                      <span className="text-slate-400 text-xs font-semibold">
-                        {c.templateName ? `Template: ${c.templateName}` : "Free Text"}
-                      </span>
-                      <span className="text-slate-300 text-xs">·</span>
-                      <span className="text-slate-400 text-xs flex items-center gap-1 font-mono">
-                        <Clock size={12} />
-                        {new Date(c.createdAt).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-wa-green font-extrabold text-lg">{deliveryRate}%</p>
-                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">delivery rate</p>
-                  </div>
-                </div>
-
-                {/* Stats bar */}
-                <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-                  {[
-                    { icon: TrendingUp, label: "Total Recipient", value: c.totalContacts, color: "text-slate-500" },
-                    { icon: TrendingUp, label: "Sent", value: c.sentCount, color: "text-blue-500" },
-                    { icon: CheckCheck, label: "Delivered", value: deliveredDisplay, color: "text-wa-green" },
-                    { icon: Eye, label: "Read", value: c.readCount || 0, color: "text-cyan-500" },
-                    { icon: XCircle, label: "Failed", value: c.failedCount || 0, color: "text-red-500" },
-                  ].map(({ label, value, color }) => (
-                    <div key={label} className="bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-100/50">
-                      <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">{label}</p>
-                      <p className={`text-base font-extrabold mt-0.5 ${color}`}>{value}</p>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Progress bar */}
-                {total > 0 && (
-                  <div>
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden flex">
-                      <div
-                        className="h-full bg-wa-green rounded-full transition-all duration-500"
-                        style={{ width: `${Math.min(100, (effectiveDelivered / total) * 100)}%` }}
-                      />
-                      <div
-                        className="h-full bg-cyan-400 transition-all duration-500"
-                        style={{ width: `${Math.min(100, ((c.readCount || 0) / total) * 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Expanded logs section */}
-                {isExpanded && (
-                  <div className="mt-2 border-t border-slate-100 pt-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                        Campaign Logs
-                      </h4>
-                      <button
-                        onClick={() => handleToggleExpand(c._id)}
-                        className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1 font-semibold"
-                      >
-                        <ChevronUp size={14} /> Hide logs
-                      </button>
-                    </div>
-
-                    {loadingMessages ? (
-                      <div className="flex items-center justify-center py-6 text-xs text-slate-500 gap-2">
-                        <div className="w-4.5 h-4.5 border-2 border-wa-green border-t-transparent rounded-full animate-spin" />
-                        Loading log details...
-                      </div>
-                    ) : campaignMessages.length === 0 ? (
-                      <p className="text-xs text-slate-400 py-3 text-center bg-slate-50 rounded-xl">
-                        No individual logs found for this campaign.
-                      </p>
-                    ) : (
-                      <div className="overflow-x-auto rounded-xl border border-slate-100 bg-white">
-                        <table className="w-full text-left text-xs text-slate-600">
-                          <thead>
-                            <tr className="border-b border-slate-100 bg-slate-50 text-slate-500 font-bold">
-                              <th className="p-3">Contact Name</th>
-                              <th className="p-3">Phone</th>
-                              <th className="p-3">Status</th>
-                              <th className="p-3">Details / Error Log</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {campaignMessages.map((m) => (
-                              <tr key={m._id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
-                                <td className="p-3 text-slate-800 font-semibold">{m.contactName || "—"}</td>
-                                <td className="p-3 font-mono text-slate-400">{m.phone}</td>
-                                <td className="p-3">
-                                  <span
-                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                                      m.status === "read"
-                                        ? "bg-cyan-100 text-cyan-700"
-                                        : m.status === "delivered"
-                                        ? "bg-wa-green/20 text-wa-green"
-                                        : m.status === "failed"
-                                        ? "bg-red-100 text-red-700"
-                                        : "bg-blue-100 text-blue-700"
-                                    }`}
-                                  >
-                                    {m.status}
-                                  </span>
-                                </td>
-                                <td className="p-3 text-slate-500 max-w-[250px] truncate" title={m.errorDetails || ""}>
-                                  {m.status === "failed" && m.errorDetails ? (
-                                    <span className="text-red-500 flex items-center gap-1 font-medium">
-                                      <AlertOctagon size={12} className="shrink-0" />
-                                      {m.errorDetails}
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-400">—</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Expand toggler button */}
-                {!isExpanded && (
-                  <div className="flex justify-end">
-                    <button
-                      onClick={() => handleToggleExpand(c._id)}
-                      className="text-xs text-wa-green hover:text-wa-green/80 flex items-center gap-1 font-semibold bg-[#F3FAF4] hover:bg-[#E8F5EB] px-3.5 py-2 rounded-xl transition-all border border-wa-green/10"
-                    >
-                      <ChevronDown size={14} /> View Message Logs
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+    <Page
+      header={
+        <PageHeader
+          title="Campaigns"
+          description="Delivery results for every bulk send."
+          actions={
+            <Link to="/bulk" className="btn btn-primary">
+              New campaign
+            </Link>
+          }
+        />
+      }
+    >
+      {error && (
+        <div className="mb-4">
+          <ErrorState message={error} onRetry={loadCampaigns} />
         </div>
       )}
-    </div>
+
+      <div className="panel overflow-hidden">
+        {!loading && campaigns.length === 0 && !error ? (
+          <EmptyState
+            icon={Megaphone}
+            title="No campaigns yet"
+            description="Send your first campaign from Bulk send."
+            action={<Link to="/bulk" className="btn btn-primary btn-sm">New campaign</Link>}
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th className="w-10" aria-label="Expand" />
+                  <th>Campaign</th>
+                  <th>Status</th>
+                  <th className="text-right">Recipients</th>
+                  <th className="text-right">Sent</th>
+                  <th className="text-right">Delivered</th>
+                  <th className="text-right">Read</th>
+                  <th className="text-right">Failed</th>
+                  <th className="w-40">Delivery rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <LoadingRows rows={5} cols={9} />
+                ) : (
+                  campaigns.map((c) => {
+                    const expanded = expandedId === c._id;
+                    const rate = deliveryRateOf(c);
+                    return (
+                      <Fragment key={c._id}>
+                        <tr className={`cursor-pointer ${expanded ? "bg-gray-50" : "hover:bg-gray-50"}`} onClick={() => toggleExpand(c._id)}>
+                          <td className="pr-0">
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm btn-icon"
+                              aria-expanded={expanded}
+                              aria-label={expanded ? `Hide message log for ${c.name}` : `Show message log for ${c.name}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleExpand(c._id);
+                              }}
+                            >
+                              {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                            </button>
+                          </td>
+                          <td className="min-w-[220px]">
+                            <p className="font-medium text-gray-900">{c.name}</p>
+                            <p className="text-xs text-gray-500">
+                              {c.templateName ? `Template · ${c.templateName}` : "Free text"} · {formatDateTime(c.createdAt)}
+                            </p>
+                          </td>
+                          <td>
+                            <StatusBadge kind="campaign" status={c.status} />
+                          </td>
+                          <td className="num text-right">{formatNumber(c.totalContacts)}</td>
+                          <td className="num text-right">{formatNumber(c.sentCount || 0)}</td>
+                          <td className="num text-right">{formatNumber(c.deliveredCount || 0)}</td>
+                          <td className="num text-right">{formatNumber(c.readCount || 0)}</td>
+                          <td className={`num text-right ${c.failedCount > 0 ? "text-red-600" : ""}`}>{formatNumber(c.failedCount || 0)}</td>
+                          <td>
+                            <div className="flex items-center gap-2">
+                              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100" aria-hidden="true">
+                                <div className="h-full rounded-full bg-brand-500" style={{ width: `${rate}%` }} />
+                              </div>
+                              <span className="w-9 text-right tabular-nums text-gray-900">{rate}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                        {expanded && (
+                          <tr>
+                            <td colSpan={9} className="h-auto border-b border-gray-200 bg-gray-50 p-0">
+                              <div className="m-3 rounded-md border border-gray-200 bg-white">
+                                <CampaignLog loading={loadingMessages} messages={campaignMessages} />
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {campaigns.length >= CAMPAIGN_LIMIT && (
+        <p className="mt-3 text-xs text-gray-500">Showing the {CAMPAIGN_LIMIT} most recent campaigns.</p>
+      )}
+    </Page>
   );
 }

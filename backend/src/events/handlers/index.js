@@ -11,6 +11,20 @@ const logger = require("../../utils/logger");
 
 const { normalizePhone } = require("../../utils/phone");
 
+const STATUS_RANK = { queued: 0, accepted: 1, sending: 1, sent: 2, delivered: 3, read: 4 };
+const FAILURE_STATUSES = new Set(["failed", "undelivered"]);
+
+// Providers can deliver status callbacks out of order (e.g. "delivered" after
+// "read"). A message should only ever move forward, or the ticks regress.
+const isStatusRegression = (current, next) => {
+  if (!current || current === next) return false;
+  if (FAILURE_STATUSES.has(next)) return current === "delivered" || current === "read";
+  const currentRank = STATUS_RANK[current];
+  const nextRank = STATUS_RANK[next];
+  if (currentRank === undefined || nextRank === undefined) return false;
+  return nextRank < currentRank;
+};
+
 const registerHandlers = () => {
   eventBus.subscribe("IncomingMessageEvent", async (payload) => {
     logger.info("Handling IncomingMessageEvent inside event handlers", { messageSid: payload.messageSid });
@@ -139,6 +153,12 @@ const registerHandlers = () => {
     const io = getIo();
 
     try {
+      const existing = await messageRepository.findByMessageId(messageSid).catch(() => null);
+      if (existing && isStatusRegression(existing.status, status)) {
+        logger.info(`Ignoring out-of-order status '${status}' for ${messageSid} (already '${existing.status}')`);
+        return;
+      }
+
       const updateData = { status, updated_at: new Date().toISOString() };
       if (errorDetails) updateData.error_details = errorDetails;
       if (errorCategory) updateData.error_category = errorCategory;
@@ -228,4 +248,4 @@ const registerHandlers = () => {
   });
 };
 
-module.exports = { registerHandlers };
+module.exports = { registerHandlers, isStatusRegression };

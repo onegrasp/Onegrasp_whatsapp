@@ -32,7 +32,7 @@ A self-hosted WhatsApp bulk messaging system that sends via **Twilio** and/or th
 ## Prerequisites
 
 1. **Node.js** v18+
-2. **Supabase** project (run the SQL in `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`)
+2. **Supabase** project (run the SQL in `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`, then `backend/migrations/004_message_media.sql`)
 3. A WhatsApp sender: a **Twilio** account with WhatsApp enabled, and/or a **Meta Developer Account** with a WhatsApp Business App
 
 ---
@@ -147,13 +147,15 @@ To send bulk messages to users who haven't messaged you first, you **must** use 
 ---
 ## CSV Upload Format
 ```csv
-Name,Phone
-John Doe,919876543210
-Alice Smith,919988877766
-Mike Johnson,919999888777
+Name,Country Code,Phone
+John Doe,91,9876543210
+Alice Smith,91,9988877766
+Jane Smith,1,4155238886
 ```
-- Phone numbers must include **country code** (91 for India)
-- No `+` prefix, no spaces or dashes
+- **Country Code** is optional when the phone numbers already include it (e.g. `+919876543210` or `919876543210`)
+- Spaces, dashes, dots, brackets and stray symbols in numbers are ignored
+- In Excel, format the Phone column as **Text** before entering numbers. Numbers saved in scientific notation (e.g. `9.19E+11`) have lost digits and are rejected
+- Numbers already in your contacts are reported, not duplicated or overwritten; duplicates inside the file are reported with their row numbers
 - Column headers are case-insensitive (`name`, `Name`, `NAME` all work)
 ---
 ## API Reference
@@ -216,7 +218,7 @@ Mike Johnson,919999888777
 ### Database (Supabase)
 
 1. Create a Supabase project
-2. Run `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql` in the SQL editor
+2. Run `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`, then `backend/migrations/004_message_media.sql` in the SQL editor
 3. Copy the project URL to `SUPABASE_URL` and the **service role** key to `SUPABASE_KEY` (server-side only — never ship it to the browser)
 
 ### Background worker & serverless note

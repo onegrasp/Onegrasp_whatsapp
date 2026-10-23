@@ -58,6 +58,7 @@ const scheduleRetry = async (job, err) => {
         error_category: errorCategory,
         template_name: job.template_name || "",
         campaign_id: job.campaign_id,
+        media_url: job.media_url || "",
         timestamp: failTime,
       });
     } catch (msgErr) {}

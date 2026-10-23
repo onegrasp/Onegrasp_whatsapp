@@ -108,6 +108,7 @@ const process = async (job) => {
       message_id: messageSid,
       template_name: job.template_name || "",
       campaign_id: job.campaign_id,
+      media_url: job.media_url || "",
       timestamp: new Date().toISOString(),
     });
 
@@ -137,6 +138,7 @@ const process = async (job) => {
         messageId: savedMsg.message_id,
         templateName: savedMsg.template_name,
         campaignId: savedMsg.campaign_id,
+        mediaUrl: job.media_url || "",
         timestamp: savedMsg.timestamp,
       });
     }
@@ -159,6 +161,7 @@ const process = async (job) => {
         error_category: err.category || "api_error",
         template_name: job.template_name || "",
         campaign_id: job.campaign_id,
+        media_url: job.media_url || "",
         timestamp: failTime,
       });
 

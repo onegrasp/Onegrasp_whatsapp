@@ -1,12 +1,27 @@
 const supabase = require("../config/supabase");
+const logger = require("../utils/logger");
+
+// messages.media_url is added by migrations/004_message_media.sql. Until that
+// migration runs, inserting the column fails, so retry without it rather than
+// losing the message record.
+let mediaColumnMissing = false;
+const isMissingMediaColumn = (error) => Boolean(error && /media_url/.test(error.message || ""));
+
+const insertMessage = (payload) =>
+  supabase.from("messages").insert([payload]).select().single();
 
 const messageRepository = {
   async create(messageData) {
-    const { data, error } = await supabase
-      .from("messages")
-      .insert([messageData])
-      .select()
-      .single();
+    const payload = { ...messageData };
+    if (!payload.media_url || mediaColumnMissing) delete payload.media_url;
+
+    let { data, error } = await insertMessage(payload);
+    if (error && payload.media_url && isMissingMediaColumn(error)) {
+      mediaColumnMissing = true;
+      logger.warn("messages.media_url column is missing — run backend/migrations/004_message_media.sql so sent images appear in Chats.");
+      delete payload.media_url;
+      ({ data, error } = await insertMessage(payload));
+    }
     if (error) throw error;
     return data;
   },
@@ -53,6 +68,9 @@ const messageRepository = {
     return data;
   },
 
+  // Returns the most recent messages for a phone, oldest first within the page.
+  // Page 1 is the latest `limit` messages, so long conversations always show
+  // what was sent last instead of stopping at the first 50 ever sent.
   async findByPhone(phone, page = 1, limit = 50) {
     const fromOffset = (parseInt(page) - 1) * parseInt(limit);
     const toLimit = fromOffset + parseInt(limit) - 1;
@@ -61,11 +79,11 @@ const messageRepository = {
       .from("messages")
       .select("*", { count: "exact" })
       .eq("phone", phone)
-      .order("timestamp", { ascending: true })
+      .order("timestamp", { ascending: false })
       .range(fromOffset, toLimit);
 
     if (error) throw error;
-    return { data, count };
+    return { data: (data || []).reverse(), count };
   },
 
   async getStats() {

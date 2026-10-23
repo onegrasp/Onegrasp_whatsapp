@@ -1,41 +1,37 @@
-import { useState, useEffect, useRef } from "react";
-import {
-  Upload,
-  Send,
-  X,
-  CheckCircle,
-  AlertCircle,
-  ChevronDown,
-  Loader2,
-  Calendar,
-  Clock,
-  Sparkles,
-  Eye,
-  Smartphone,
-  Maximize2,
-  ExternalLink,
-  Phone,
-  Image as ImageIcon,
-} from "lucide-react";
-import { uploadContacts, getContacts, getContactSets, getTemplates, sendBulkMessages, uploadMediaFile } from "../services/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ImagePlus, Maximize2, Send, Upload, Users, X } from "lucide-react";
+import { getContacts, getContactSets, getTemplates, sendBulkMessages, uploadMediaFile } from "../services/api";
 import { useSocket } from "../context/SocketContext";
+import { Dialog, EmptyState, ErrorState, Field, LoadingRows, PageHeader, SegmentedControl, Spinner } from "../components/ui";
+import { useConfirm, useToast } from "../components/feedback";
+import ImportContactsDialog from "../components/ImportContactsDialog";
+import WhatsAppPreview from "../components/WhatsAppPreview";
+import { BUILT_IN_SETS, STATUS_LABELS, customSetsFrom, formatSetName } from "../lib/contacts";
+import { errorMessage, formatDateTime, formatNumber } from "../lib/format";
 
-const DEFAULT_SETS = [
-  { value: "all", label: "🌐 All Contacts" },
-  { value: "test_contacts", label: "🧪 Test Contacts" },
-  { value: "new_contacts", label: "🆕 Set of New Contacts" },
-];
+const SAMPLE_NAME = "John Doe";
+const SAMPLE_PHONE = "+919876543210";
 
-const LABELS = [
-  { value: "all", label: "All Status Labels" },
-  { value: "interested", label: "Interested" },
-  { value: "follow_up", label: "Follow Up" },
-  { value: "converted", label: "Converted" },
-  { value: "not_interested", label: "Not Interested" },
-];
+const getTemplateVariables = (tpl) => {
+  if (!tpl) return [];
+  if (tpl.variables && tpl.variables.length > 0) return tpl.variables;
+  const regex = /\{\{(\d+)\}\}/g;
+  const vars = [];
+  let match;
+  while ((match = regex.exec(tpl.body)) !== null) {
+    if (!vars.includes(match[1])) vars.push(match[1]);
+  }
+  return vars.sort((a, b) => Number(a) - Number(b));
+};
+
+const findTemplate = (templates, key) =>
+  templates.find((t) => t.content_sid === key || t.name === key || (t._id || t.id) === key);
 
 export default function BulkSender() {
-  const { socket } = useSocket();
+  const { socket, connected } = useSocket();
+  const toast = useToast();
+  const confirm = useConfirm();
+
   const [contacts, setContacts] = useState([]);
   const [selectedPhones, setSelectedPhones] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -46,129 +42,81 @@ export default function BulkSender() {
   const [filterSet, setFilterSet] = useState("all");
   const [filterLabel, setFilterLabel] = useState("all");
   const [customSets, setCustomSets] = useState([]);
-  const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
-  const [uploadResult, setUploadResult] = useState(null);
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState("");
   const [loadingContacts, setLoadingContacts] = useState(false);
+  const [contactsError, setContactsError] = useState("");
   const [campaignMedia, setCampaignMedia] = useState(null);
   const [campaignMediaUrl, setCampaignMediaUrl] = useState("");
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  // Final value per template variable: "{{contact_name}}", "{{contact_phone}}" or custom text.
   const [varValues, setVarValues] = useState({});
+  // Which source each variable uses, so "Custom text" keeps its input visible while empty.
+  const [varSources, setVarSources] = useState({});
   const [isScheduled, setIsScheduled] = useState(false);
   const [scheduledTime, setScheduledTime] = useState("");
   const [showPreviewModal, setShowPreviewModal] = useState(false);
-  const fileRef = useRef(null);
+  const [importOpen, setImportOpen] = useState(false);
   const mediaInputRef = useRef(null);
 
   useEffect(() => {
     setVarValues({});
+    setVarSources({});
   }, [selectedTemplate]);
 
-  const getTemplateVariables = (tpl) => {
-    if (!tpl) return [];
-    if (tpl.variables && tpl.variables.length > 0) return tpl.variables;
-    const regex = /\{\{(\d+)\}\}/g;
-    const vars = [];
-    let match;
-    while ((match = regex.exec(tpl.body)) !== null) {
-      if (!vars.includes(match[1])) {
-        vars.push(match[1]);
-      }
-    }
-    return vars.sort((a, b) => Number(a) - Number(b));
-  };
+  const selectedTpl = msgType === "template" ? findTemplate(templates, selectedTemplate) : null;
+  const templateVars = getTemplateVariables(selectedTpl);
 
+  // Template body for the on-screen preview: dynamic variables show sample data.
   const renderTemplateBodyPreview = (tpl) => {
     if (!tpl || !tpl.body) return "";
     let bodyText = tpl.body;
-    const vars = getTemplateVariables(tpl);
-
-    vars.forEach((v) => {
+    getTemplateVariables(tpl).forEach((v) => {
       const val = varValues[v];
       let replacement = `{{${v}}}`;
-      if (val === "{{contact_name}}") {
-        replacement = "John Doe";
-      } else if (val === "{{contact_phone}}") {
-        replacement = "+919876543210";
-      } else if (val && val.trim() !== "") {
-        replacement = val;
-      }
+      if (val === "{{contact_name}}") replacement = SAMPLE_NAME;
+      else if (val === "{{contact_phone}}") replacement = SAMPLE_PHONE;
+      else if (val && val.trim() !== "") replacement = val;
       bodyText = bodyText.replace(new RegExp(`\\{\\{${v}\\}\\}`, "g"), replacement);
     });
+    return bodyText
+      .replace(/\{\{name\}\}/gi, SAMPLE_NAME)
+      .replace(/\{\{phone\}\}/gi, SAMPLE_PHONE)
+      .replace(/\{\{contact_name\}\}/gi, SAMPLE_NAME)
+      .replace(/\{\{contact_phone\}\}/gi, SAMPLE_PHONE);
+  };
 
-    bodyText = bodyText
-      .replace(/\{\{name\}\}/gi, "John Doe")
-      .replace(/\{\{phone\}\}/gi, "+919876543210")
-      .replace(/\{\{contact_name\}\}/gi, "John Doe")
-      .replace(/\{\{contact_phone\}\}/gi, "+919876543210");
-
+  // Template body sent to the server: dynamic variables stay as
+  // {{contact_name}} / {{contact_phone}} so each recipient's own details are
+  // filled in when the message is sent. (Sending the preview text would store
+  // the sample name for every recipient.)
+  const renderTemplateBodyForSend = (tpl) => {
+    if (!tpl || !tpl.body) return "";
+    let bodyText = tpl.body;
+    getTemplateVariables(tpl).forEach((v) => {
+      const val = varValues[v];
+      const replacement = val && val.trim() !== "" ? val.replace(/[\r\n]+/g, " ").trim() : `{{${v}}}`;
+      bodyText = bodyText.replace(new RegExp(`\\{\\{${v}\\}\\}`, "g"), replacement);
+    });
     return bodyText;
   };
 
-  const handleMediaUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setUploadingMedia(true);
-    const fd = new FormData();
-    fd.append("file", file);
-    try {
-      const res = await uploadMediaFile(fd);
-      setCampaignMediaUrl(res.data.mediaUrl);
-      setCampaignMedia(file);
-    } catch (err) {
-      alert("Media upload failed: " + (err.response?.data?.error || err.message));
-    } finally {
-      setUploadingMedia(false);
-    }
-  };
-
-  useEffect(() => {
-    loadContactSets();
-    loadTemplates();
-  }, []);
-
-  useEffect(() => {
-    loadContacts();
-  }, [filterSet, filterLabel]);
-
-  const loadContactSets = async () => {
+  const loadContactSets = useCallback(async () => {
     try {
       const res = await getContactSets();
-      const counts = res.data?.sets || {};
-      const known = ["all", "test_contacts", "new_contacts", "none", "interested", "follow_up", "converted", "not_interested"];
-      const custom = Object.keys(counts).filter((k) => !known.includes(k));
-      setCustomSets(custom);
+      setCustomSets(customSetsFrom(res.data?.sets || {}));
     } catch (err) {
       console.error("Failed to load contact sets:", err);
     }
-  };
+  }, []);
 
-  useEffect(() => {
-    if (!socket) return;
-    socket.on("campaign_progress", (data) => {
-      setProgress(data);
-    });
-    socket.on("campaign_complete", (data) => {
-      setSending(false);
-      setProgress(null);
-      setError("");
-      alert(`Campaign complete! Sent: ${data.sentCount}, Failed: ${data.failedCount}`);
-    });
-    return () => {
-      socket.off("campaign_progress");
-      socket.off("campaign_complete");
-    };
-  }, [socket]);
-
-  const loadContacts = async () => {
+  const loadContacts = useCallback(async () => {
     setLoadingContacts(true);
+    setContactsError("");
     try {
-      // Load EVERY contact in the selected set by paging through all results.
-      // Previously this capped at 500, so campaigns to larger sets silently
-      // skipped everyone past the first 500. (The backend still enforces a
-      // per-campaign maximum and will return a clear error if a set is too big.)
+      // Page through the whole set — campaigns must reach everyone in it.
+      // (The backend enforces a per-campaign maximum with a clear error.)
       const pageLimit = 1000;
       const baseParams = {
         set: filterSet !== "all" ? filterSet : undefined,
@@ -189,133 +137,120 @@ export default function BulkSender() {
       setSelectedPhones(all.map((c) => c.phone));
     } catch (err) {
       console.error(err);
+      setContactsError("Contacts could not be loaded.");
     } finally {
       setLoadingContacts(false);
     }
-  };
+  }, [filterSet, filterLabel]);
 
-  const loadTemplates = async () => {
+  const loadTemplates = useCallback(async () => {
     try {
       const res = await getTemplates();
-      const rawList = res.data?.data || [];
-
-      // Deduplicate templates by Content SID or lowercased name
       const map = new Map();
-      rawList.forEach((t) => {
+      (res.data?.data || []).forEach((t) => {
         const sidKey = t.content_sid || t.contentSid;
         const nameKey = t.name ? t.name.trim().toLowerCase() : null;
-        const key = sidKey || nameKey || (t._id || t.id);
-
-        if (!map.has(key)) {
-          map.set(key, t);
-        } else {
-          const existing = map.get(key);
-          if (!existing.content_sid && (t.content_sid || t.contentSid)) {
-            map.set(key, t);
-          }
-        }
+        const key = sidKey || nameKey || t._id || t.id;
+        if (!map.has(key)) map.set(key, t);
+        else if (!map.get(key).content_sid && sidKey) map.set(key, t);
       });
-
-      const uniqueTemplates = Array.from(map.values());
-      setTemplates(uniqueTemplates);
+      setTemplates(Array.from(map.values()));
     } catch (err) {
       console.warn("Templates not available:", err.message);
     }
-  };
+  }, []);
 
-  const handleUpload = async (e) => {
-    const file = e.target.files[0];
+  useEffect(() => {
+    loadContactSets();
+    loadTemplates();
+  }, [loadContactSets, loadTemplates]);
+
+  useEffect(() => {
+    loadContacts();
+  }, [loadContacts]);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onProgress = (data) => setProgress(data);
+    const onComplete = (data) => {
+      setSending(false);
+      setProgress(null);
+      setError("");
+      toast.success(`Campaign complete: ${formatNumber(data.sentCount)} sent, ${formatNumber(data.failedCount)} failed.`);
+    };
+    socket.on("campaign_progress", onProgress);
+    socket.on("campaign_complete", onComplete);
+    return () => {
+      socket.off("campaign_progress", onProgress);
+      socket.off("campaign_complete", onComplete);
+    };
+  }, [socket, toast]);
+
+  const handleMediaUpload = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
-    setUploading(true);
-    setUploadResult(null);
-    setError("");
+    setUploadingMedia(true);
     const fd = new FormData();
     fd.append("file", file);
-    if (filterSet && filterSet !== "all") {
-      fd.append("targetSet", filterSet);
-    }
     try {
-      const res = await uploadContacts(fd);
-      setUploadResult(res.data);
-      loadContacts();
-      loadContactSets();
+      const res = await uploadMediaFile(fd);
+      setCampaignMediaUrl(res.data.mediaUrl);
+      setCampaignMedia(file);
     } catch (err) {
-      setError(err.response?.data?.error || "Upload failed");
+      toast.error(`Image upload failed: ${errorMessage(err)}`);
     } finally {
-      setUploading(false);
-      fileRef.current.value = "";
+      setUploadingMedia(false);
     }
   };
 
-  const toggleSelect = (phone) => {
-    setSelectedPhones((prev) =>
-      prev.includes(phone) ? prev.filter((p) => p !== phone) : [...prev, phone]
-    );
+  const toggleSelect = (phone) =>
+    setSelectedPhones((prev) => (prev.includes(phone) ? prev.filter((p) => p !== phone) : [...prev, phone]));
+
+  const setVariableSource = (v, source) => {
+    setVarSources((prev) => ({ ...prev, [v]: source }));
+    setVarValues((prev) => ({ ...prev, [v]: source === "static" || source === "" ? "" : `{{${source}}}` }));
   };
 
-  const selectAll = () => {
-    if (selectedPhones.length === contacts.length) {
-      setSelectedPhones([]);
-    } else {
-      setSelectedPhones(contacts.map((c) => c.phone));
-    }
-  };
+  // Validates the form and builds the API payload, or returns an error.
+  const prepareSend = () => {
+    if (selectedPhones.length === 0) return { error: "Select at least one contact." };
 
-  const handleSend = async () => {
-    if (selectedPhones.length === 0) return setError("Select at least one contact");
-    
-    let templateNameToSend = undefined;
+    let templateNameToSend;
     let paramsToSend = [];
-    let selectedTplObj = null;
 
     if (msgType === "template") {
-      if (!selectedTemplate) return setError("Select a template");
-      selectedTplObj = templates.find(t => t.content_sid === selectedTemplate || t.name === selectedTemplate || (t._id || t.id) === selectedTemplate);
-      if (selectedTplObj) {
-        templateNameToSend = selectedTplObj.content_sid || selectedTplObj.contentSid || selectedTplObj.name;
-        const vars = getTemplateVariables(selectedTplObj);
-
-        // Validate each required variable is filled out or mapped to contact fields
-        for (let i = 0; i < vars.length; i++) {
-          const v = vars[i];
+      if (!selectedTemplate) return { error: "Select a template." };
+      if (selectedTpl) {
+        templateNameToSend = selectedTpl.content_sid || selectedTpl.contentSid || selectedTpl.name;
+        for (const v of templateVars) {
           const val = varValues[v];
-          if (!val || val.trim() === "") {
-            return setError(`Please provide a value for variable {{${v}}}`);
-          }
+          if (!val || val.trim() === "") return { error: `Provide a value for variable {{${v}}}.` };
         }
-
-        paramsToSend = vars.map((v) => {
-          const rawVal = varValues[v] || "";
-          return rawVal.replace(/[\r\n]+/g, " ").trim();
-        });
+        paramsToSend = templateVars.map((v) => (varValues[v] || "").replace(/[\r\n]+/g, " ").trim());
       } else {
         templateNameToSend = selectedTemplate;
       }
     }
 
     if (msgType === "text" && !freeText.trim() && !campaignMediaUrl) {
-      return setError("Enter a message text or attach campaign media");
+      return { error: "Write a message or attach an image." };
     }
 
-    let scheduledAtISO = undefined;
+    let scheduledAtISO;
     if (isScheduled) {
-      if (!scheduledTime) return setError("Select a valid date and time to schedule your campaign");
+      if (!scheduledTime) return { error: "Choose a date and time for the scheduled campaign." };
       const schedDate = new Date(scheduledTime);
-      if (isNaN(schedDate.getTime()) || schedDate <= new Date()) {
-        return setError("Scheduled date and time must be in the future");
+      if (Number.isNaN(schedDate.getTime()) || schedDate <= new Date()) {
+        return { error: "The scheduled time must be in the future." };
       }
       scheduledAtISO = schedDate.toISOString();
     }
 
-    setError("");
-    setSending(true);
+    const messageTextToSend = msgType === "text" ? freeText : selectedTpl ? renderTemplateBodyForSend(selectedTpl) : freeText;
 
-    const messageTextToSend = msgType === "text"
-      ? freeText
-      : (selectedTplObj ? renderTemplateBodyPreview(selectedTplObj) : freeText);
-
-    try {
-      const res = await sendBulkMessages({
+    return {
+      payload: {
         phones: selectedPhones,
         templateName: templateNameToSend,
         message: messageTextToSend || undefined,
@@ -324,636 +259,414 @@ export default function BulkSender() {
         params: paramsToSend,
         mediaUrl: campaignMediaUrl || undefined,
         scheduledAt: scheduledAtISO,
-      });
+      },
+    };
+  };
 
+  const handleSend = async () => {
+    const { error: validationError, payload } = prepareSend();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setError("");
+
+    const count = selectedPhones.length;
+    const ok = await confirm({
+      title: isScheduled ? "Schedule this campaign?" : "Send this campaign now?",
+      confirmLabel: isScheduled ? "Schedule" : `Send to ${formatNumber(count)}`,
+      message: (
+        <dl className="divide-y divide-gray-100 rounded-md border border-gray-200">
+          {[
+            ["Campaign", payload.campaignName],
+            ["Recipients", formatNumber(count)],
+            ["Message", msgType === "template" ? `Template: ${selectedTpl?.name || selectedTemplate}` : "Free text"],
+            ...(campaignMediaUrl ? [["Image", "Attached"]] : []),
+            ...(isScheduled ? [["Starts", formatDateTime(scheduledTime)]] : []),
+          ].map(([k, v]) => (
+            <div key={k} className="flex justify-between gap-4 px-3 py-2">
+              <dt className="text-gray-500">{k}</dt>
+              <dd className="truncate text-right font-medium text-gray-900">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      ),
+    });
+    if (!ok) return;
+
+    setSending(true);
+    try {
+      const res = await sendBulkMessages(payload);
       if (isScheduled) {
         setSending(false);
-        const formattedDate = new Date(scheduledTime).toLocaleString();
-        alert(`🗓️ Campaign successfully scheduled!\n\nIt will start automatically on ${formattedDate} for ${selectedPhones.length} contacts.`);
+        toast.success(`Campaign scheduled for ${formatDateTime(scheduledTime)} (${formatNumber(count)} contacts).`);
         setIsScheduled(false);
         setScheduledTime("");
         setCampaignName("");
+        return;
       }
+      const queued = res.data?.queued ?? count;
+      const skipped = res.data?.failed || 0;
+      if (queued === 0) {
+        setSending(false);
+        toast.error(`No messages were queued. ${formatNumber(skipped)} numbers were invalid or opted out.`);
+        return;
+      }
+      toast.info(`Campaign started: ${formatNumber(queued)} queued${skipped ? `, ${formatNumber(skipped)} skipped` : ""}.`);
+      // Progress arrives over the live connection; without it, follow up in Campaigns.
+      if (!connected) setSending(false);
     } catch (err) {
-      setError(err.response?.data?.error || "Failed to start campaign");
+      setError(errorMessage(err, "The campaign could not be started."));
       setSending(false);
     }
   };
 
+  const allSelected = contacts.length > 0 && selectedPhones.length === contacts.length;
+  const previewBody = msgType === "template" ? renderTemplateBodyPreview(selectedTpl) : freeText.replace(/\{\{name\}\}/gi, SAMPLE_NAME).replace(/\{\{phone\}\}/gi, SAMPLE_PHONE);
+  const previewImage = campaignMediaUrl || selectedTpl?.header_image_url || selectedTpl?.headerImageUrl || "";
+  const setOptions = [...BUILT_IN_SETS.map((s) => s.value), ...customSets];
+
   return (
-    <div className="h-full flex overflow-hidden">
-      {/* Left: Contacts */}
-      <div className="flex-1 flex flex-col border-r border-surface-border overflow-hidden bg-white">
-        {/* Header */}
-        <div className="p-4 border-b border-surface-border flex items-center justify-between gap-3 flex-wrap bg-white">
-          <div>
-            <h1 className="text-sm font-bold text-slate-900">Bulk Send</h1>
-            <p className="text-xs text-slate-500">{contacts.length} contacts loaded</p>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* Contact Set Selector */}
-            <div className="relative">
-              <select
-                value={filterSet}
-                onChange={(e) => setFilterSet(e.target.value)}
-                className="input pr-8 appearance-none cursor-pointer text-xs font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl"
-                style={{ width: 185 }}
-              >
-                {DEFAULT_SETS.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-                {customSets.map((cs) => (
-                  <option key={cs} value={cs}>🏷️ {cs.replace(/_/g, " ").toUpperCase()}</option>
-                ))}
-              </select>
-              <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            </div>
+    <div className="flex h-full flex-col overflow-hidden">
+      <PageHeader title="Bulk send" description="Choose recipients, compose the message, and send or schedule." />
 
-            {/* Label filter */}
-            <div className="relative">
-              <select
-                value={filterLabel}
-                onChange={(e) => setFilterLabel(e.target.value)}
-                className="input pr-8 appearance-none cursor-pointer text-xs"
-                style={{ width: 140 }}
-              >
-                {LABELS.map((l) => (
-                  <option key={l.value} value={l.value}>{l.label}</option>
-                ))}
-              </select>
-              <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            </div>
-            {/* Upload */}
-            <button
-              onClick={() => fileRef.current.click()}
-              className="btn-primary"
-              disabled={uploading}
-            >
-              {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-              Upload File (CSV/Excel)
-            </button>
-            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,.xlsb,.xlsm,.ods,.xml,.txt,.tsv,.prn" onChange={handleUpload} className="hidden" />
-          </div>
-        </div>
-
-        {/* Upload result */}
-        {uploadResult && (
-          <div className="mx-4 mt-3 p-3 rounded-2xl bg-wa-green/10 border border-wa-green/30 flex items-center justify-between gap-2 animate-fade-in">
-            <div className="flex items-center gap-2">
-              <CheckCircle size={16} className="text-wa-green shrink-0" />
-              <div className="text-xs">
-                <span className="font-bold text-slate-800">Uploaded {uploadResult.total} total rows: </span>
-                <span className="text-wa-green font-bold">{uploadResult.added} new contacts added</span>
-                {uploadResult.duplicates > 0 && (
-                  <span className="text-amber-700 font-semibold ml-2">• ⚠️ {uploadResult.duplicates} duplicate numbers updated/skipped</span>
-                )}
-              </div>
-            </div>
-            <button onClick={() => setUploadResult(null)} className="text-slate-400 hover:text-slate-600 p-1">
-              <X size={14} />
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+        {/* Recipients */}
+        <section aria-label="Recipients" className="flex flex-col border-b border-gray-200 lg:min-h-0 lg:flex-1 lg:border-b-0 lg:border-r">
+          <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-4 py-3 sm:px-6 lg:px-8">
+            <select aria-label="Contact set" value={filterSet} onChange={(e) => setFilterSet(e.target.value)} className="input w-auto">
+              <option value="all">All contacts</option>
+              {setOptions.map((s) => (
+                <option key={s} value={s}>
+                  {formatSetName(s)}
+                </option>
+              ))}
+            </select>
+            <select aria-label="Status label" value={filterLabel} onChange={(e) => setFilterLabel(e.target.value)} className="input w-auto">
+              <option value="all">Any status</option>
+              {STATUS_LABELS.map((l) => (
+                <option key={l.value} value={l.value}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="btn btn-secondary ml-auto" onClick={() => setImportOpen(true)}>
+              <Upload size={14} aria-hidden="true" />
+              Import
             </button>
           </div>
-        )}
 
-        {/* Contacts Table */}
-        <div className="flex-1 overflow-y-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-[#F3FAF4] border-b border-surface-border">
-              <tr>
-                <th className="px-4 py-3 text-left">
-                  <input
-                    type="checkbox"
-                    checked={selectedPhones.length === contacts.length && contacts.length > 0}
-                    onChange={selectAll}
-                    className="rounded"
-                  />
-                </th>
-                <th className="px-4 py-3 text-left text-slate-400 font-medium text-xs">Name</th>
-                <th className="px-4 py-3 text-left text-slate-400 font-medium text-xs">Phone</th>
-                <th className="px-4 py-3 text-left text-slate-400 font-medium text-xs">Label</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loadingContacts ? (
-                Array(5).fill(0).map((_, i) => (
-                  <tr key={i} className="border-b border-surface-border/50">
-                    <td className="px-4 py-3" colSpan={4}>
-                      <div className="h-4 bg-[#F3FAF4] rounded animate-pulse" />
-                    </td>
-                  </tr>
-                ))
-              ) : contacts.length === 0 ? (
+          {contactsError && (
+            <div className="px-4 pt-3 sm:px-6 lg:px-8">
+              <ErrorState message={contactsError} onRetry={loadContacts} />
+            </div>
+          )}
+
+          <div className="max-h-[55vh] min-h-[240px] flex-1 overflow-y-auto lg:max-h-none">
+            <table className="table">
+              <thead className="sticky top-0 z-10">
                 <tr>
-                  <td colSpan={4} className="px-4 py-12 text-center text-slate-500 text-xs">
-                    No contacts. Upload a CSV to get started.
-                  </td>
+                  <th className="w-10 pl-4 sm:pl-6 lg:pl-8">
+                    <input
+                      type="checkbox"
+                      className="checkbox"
+                      aria-label="Select all recipients"
+                      checked={allSelected}
+                      onChange={() => setSelectedPhones(allSelected ? [] : contacts.map((c) => c.phone))}
+                    />
+                  </th>
+                  <th>Name</th>
+                  <th>Phone</th>
+                  <th>Set / label</th>
                 </tr>
-              ) : (
-                contacts.map((c) => (
-                  <tr
-                    key={c._id}
-                    onClick={() => toggleSelect(c.phone)}
-                    className={`border-b border-surface-border/50 cursor-pointer hover:bg-[#F3FAF4] transition-colors ${
-                      selectedPhones.includes(c.phone) ? "bg-wa-green/5" : ""
-                    }`}
-                  >
-                    <td className="px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedPhones.includes(c.phone)}
-                        onChange={() => toggleSelect(c.phone)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="rounded"
+              </thead>
+              <tbody>
+                {loadingContacts ? (
+                  <LoadingRows rows={6} cols={4} />
+                ) : contacts.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="h-auto">
+                      <EmptyState
+                        icon={Users}
+                        title="No contacts in this selection"
+                        description="Choose another set or import contacts."
+                        action={
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setImportOpen(true)}>
+                            Import contacts
+                          </button>
+                        }
                       />
                     </td>
-                    <td className="px-4 py-3 text-slate-900 text-xs">{c.name}</td>
-                    <td className="px-4 py-3 text-slate-400 text-xs font-mono">{c.phone}</td>
-                    <td className="px-4 py-3">
-                      {c.label !== "none" && (
-                        <span className="badge bg-[#F3FAF4] text-slate-600 text-xs">{c.label.replace("_", " ")}</span>
-                      )}
-                    </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Selection count */}
-        {selectedPhones.length > 0 && (
-          <div className="px-4 py-2 border-t border-surface-border bg-white">
-            <p className="text-xs text-wa-green">{selectedPhones.length} contacts selected</p>
-          </div>
-        )}
-      </div>
-
-      {/* Right: Compose */}
-      <div className="w-80 flex flex-col bg-white overflow-y-auto p-5 gap-5 shadow-sm rounded-3xl">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-900 mb-4">Compose Campaign</h2>
-
-          {/* Campaign name */}
-          <div className="mb-4">
-            <label className="block text-xs text-slate-400 mb-1.5">Campaign Name</label>
-            <input
-              value={campaignName}
-              onChange={(e) => setCampaignName(e.target.value)}
-              placeholder="e.g. July Promo"
-              className="input"
-            />
+                ) : (
+                  contacts.map((c) => {
+                    const checked = selectedPhones.includes(c.phone);
+                    return (
+                      <tr key={c._id} onClick={() => toggleSelect(c.phone)} className={`cursor-pointer ${checked ? "bg-brand-50/40" : "hover:bg-gray-50"}`}>
+                        <td className="pl-4 sm:pl-6 lg:pl-8">
+                          <input
+                            type="checkbox"
+                            className="checkbox"
+                            aria-label={`Select ${c.name}`}
+                            checked={checked}
+                            onChange={() => toggleSelect(c.phone)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </td>
+                        <td className="whitespace-nowrap text-gray-900">{c.name}</td>
+                        <td className="num whitespace-nowrap">{c.phone}</td>
+                        <td className="text-gray-500">{c.label && c.label !== "none" ? formatSetName(c.label) : "—"}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
 
-          {/* Message type */}
-          <div className="mb-4">
-            <label className="block text-xs text-slate-400 mb-1.5">Message Type</label>
-            <div className="flex rounded-lg overflow-hidden border border-surface-border">
-              {["template", "text"].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setMsgType(t)}
-                  className={`flex-1 py-2 text-xs font-medium transition-colors ${
-                    msgType === t
-                      ? "bg-wa-green text-slate-900"
-                      : "text-slate-600 hover:text-wa-green hover:bg-wa-green/10"
-                  }`}
-                >
-                  {t === "template" ? "Template" : "Free Text"}
-                </button>
-              ))}
+          <div className="flex items-center justify-between border-t border-gray-200 px-4 py-2.5 text-13 sm:px-6 lg:px-8">
+            <span className="tabular-nums text-gray-600">
+              <strong className="font-semibold text-gray-900">{formatNumber(selectedPhones.length)}</strong> of {formatNumber(contacts.length)} selected
+            </span>
+            <button
+              type="button"
+              className="font-medium text-brand-700 hover:text-brand-800"
+              onClick={() => setSelectedPhones(allSelected ? [] : contacts.map((c) => c.phone))}
+              disabled={contacts.length === 0}
+            >
+              {allSelected ? "Clear selection" : "Select all"}
+            </button>
+          </div>
+        </section>
+
+        {/* Compose */}
+        <aside aria-label="Compose campaign" className="flex shrink-0 flex-col bg-white lg:w-[420px] lg:overflow-y-auto">
+          <div className="flex-1 space-y-5 px-4 py-5 sm:px-6">
+            <Field label="Campaign name" hint="Shown in Campaigns. Defaults to today's date.">
+              {(id) => <input id={id} className="input" value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="e.g. July promotion" />}
+            </Field>
+
+            <div>
+              <span className="label">Message type</span>
+              <SegmentedControl
+                label="Message type"
+                value={msgType}
+                onChange={setMsgType}
+                options={[
+                  { value: "template", label: "Template" },
+                  { value: "text", label: "Free text" },
+                ]}
+              />
+              <p className="hint">
+                {msgType === "template"
+                  ? "Required for contacts who haven't messaged you in the last 24 hours."
+                  : "Only delivered to contacts who messaged you in the last 24 hours."}
+              </p>
             </div>
-          </div>
 
-              {/* Template picker */}
-              {msgType === "template" && (
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-slate-700">Template</label>
-                    {selectedTemplate && (
-                      <button
-                        type="button"
-                        onClick={() => setShowPreviewModal(true)}
-                        className="bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-200/80 px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-xs shrink-0 active:scale-[0.97]"
-                        title="Click to open full WhatsApp chat preview"
-                      >
-                        <Eye size={13} className="shrink-0" />
-                        <span>Preview Template</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {templates.length > 0 ? (
-                    <div className="relative mb-3">
+            {msgType === "template" ? (
+              <div className="space-y-4">
+                {templates.length > 0 ? (
+                  <Field label="Template">
+                    {(id) => (
                       <select
+                        id={id}
+                        className="input"
                         value={selectedTemplate}
                         onChange={(e) => {
                           const val = e.target.value;
                           setSelectedTemplate(val);
-                          const tpl = templates.find(t => (t._id || t.id) === val || t.content_sid === val || t.name === val);
+                          const tpl = findTemplate(templates, val);
                           if (tpl && (tpl.header_image_url || tpl.headerImageUrl)) {
                             setCampaignMediaUrl(tpl.header_image_url || tpl.headerImageUrl);
                           }
                         }}
-                        className="input appearance-none pr-8 font-medium text-slate-700"
                       >
-                        <option value="">Select template...</option>
+                        <option value="">Select a template</option>
                         {templates.map((t) => (
-                          <option 
-                            key={t._id || t.id} 
-                            value={t._id || t.id} 
-                            disabled={t.status?.toLowerCase() === "rejected"}
-                          >
-                            {t.name} ({t.status || "draft"}) {t.content_sid ? `[${t.content_sid.slice(0, 8)}...]` : ""} {t.type === "media" || t.header_image_url ? "📷" : ""}
+                          <option key={t._id || t.id} value={t._id || t.id} disabled={t.status?.toLowerCase() === "rejected"}>
+                            {t.name} ({t.status || "draft"}){t.type === "media" || t.header_image_url ? " · image" : ""}
                           </option>
                         ))}
                       </select>
-                      <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                    </div>
-                  ) : (
-                    <div className="mb-3">
-                      <input
-                        value={selectedTemplate}
-                        onChange={(e) => setSelectedTemplate(e.target.value)}
-                        placeholder="Enter template name exactly"
-                        className="input"
-                      />
-                      <p className="text-xs text-slate-500 mt-1">
-                        Enter the exact approved template name from Meta.
-                      </p>
-                    </div>
-                  )}
+                    )}
+                  </Field>
+                ) : (
+                  <Field label="Template name" hint="Enter the exact name of an approved template.">
+                    {(id) => <input id={id} className="input" value={selectedTemplate} onChange={(e) => setSelectedTemplate(e.target.value)} />}
+                  </Field>
+                )}
 
-                  {/* Dynamic Variable Input Fields & Live Preview */}
-                  {(() => {
-                    const tpl = templates.find(t => t.content_sid === selectedTemplate || t.name === selectedTemplate || (t._id || t.id) === selectedTemplate);
-                    if (!tpl) return null;
-                    const vars = getTemplateVariables(tpl);
-                    const isMediaTpl = tpl.type === "media" || !!tpl.header_image_url;
-                    const previewHeaderImg = campaignMediaUrl || tpl.header_image_url || tpl.headerImageUrl;
-
-                    return (
-                      <div className="space-y-3 mb-3">
-                        {isMediaTpl && (
-                          <div className="p-2.5 bg-emerald-50 border border-emerald-200/60 rounded-xl text-[11px] text-emerald-800 flex items-center gap-2">
-                            <Sparkles size={12} className="text-emerald-600 shrink-0" />
-                            <span>This approved template has an image header. Verify or attach your image URL below.</span>
-                          </div>
-                        )}
-
-                        {vars.length > 0 && (
-                          <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-2.5">
-                            <p className="text-xs font-bold text-slate-600 mb-1 select-none">Template Variables</p>
-                            <div className="space-y-2">
-                              {vars.map((v) => {
-                                const val = varValues[v] || "";
-                                const selectVal = val === "{{contact_name}}" || val === "{{contact_phone}}" ? val : (val === "" ? "" : "static");
-                                
-                                return (
-                                  <div key={v} className="p-2 bg-white rounded-xl border border-slate-150/65 shadow-sm space-y-1.5">
-                                    <label className="block text-[10px] font-semibold text-slate-500">Variable {v}</label>
-                                    
-                                    <select
-                                      value={selectVal}
-                                      onChange={(e) => {
-                                        const sel = e.target.value;
-                                        if (sel === "static") {
-                                          setVarValues(prev => ({ ...prev, [v]: "" }));
-                                        } else {
-                                          setVarValues(prev => ({ ...prev, [v]: sel }));
-                                        }
-                                      }}
-                                      className="input py-1 px-2 text-xs"
-                                    >
-                                      <option value="">Select variable source...</option>
-                                      <option value="{{contact_name}}">Contact Name (Dynamic)</option>
-                                      <option value="{{contact_phone}}">Contact Phone (Dynamic)</option>
-                                      <option value="static">Custom Static Text</option>
-                                    </select>
-
-                                    {selectVal === "static" && (
-                                      <input
-                                        type="text"
-                                        value={val}
-                                        onChange={(e) => setVarValues(prev => ({ ...prev, [v]: e.target.value }))}
-                                        placeholder={`Enter static text for variable ${v}`}
-                                        className="input py-1.5 px-2 text-xs"
-                                        required
-                                      />
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* In-Line WhatsApp Chat Preview Card */}
-                        <div className="border border-slate-200/80 rounded-2xl p-3 bg-[#efeae2]/60 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
-                              <Smartphone size={11} className="text-emerald-600" />
-                              WhatsApp Message Preview
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setShowPreviewModal(true)}
-                              className="text-[10px] font-bold text-emerald-700 hover:underline flex items-center gap-0.5"
-                            >
-                              <Eye size={11} /> Full Screen
-                            </button>
-                          </div>
-
-                          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col max-w-full">
-                            {previewHeaderImg && (
-                              <div className="w-full h-32 bg-slate-900/5 border-b border-slate-100 flex items-center justify-center overflow-hidden">
-                                <img src={previewHeaderImg} alt="Header" className="w-full h-full object-cover" />
-                              </div>
-                            )}
-
-                            <div className="p-3 space-y-1.5">
-                              <p className="text-[11.5px] leading-relaxed text-slate-800 font-normal whitespace-pre-wrap break-words">
-                                {renderTemplateBodyPreview(tpl)}
-                              </p>
-                              <div className="flex items-center justify-end gap-1 text-[9px] text-slate-400 select-none">
-                                <span>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-                                <span className="text-[#53bdeb] font-bold text-[10px]">✓✓</span>
-                              </div>
-                            </div>
-
-                            {tpl.buttons && tpl.buttons.length > 0 && (
-                              <div className="border-t border-slate-100 bg-white divide-y divide-slate-100">
-                                {tpl.buttons.map((btn, index) => (
-                                  <div key={index} className="py-1.5 px-3 text-center text-[11px] font-semibold text-[#00a884] flex items-center justify-center gap-1">
-                                    {btn.type === "URL" ? <ExternalLink size={10} /> : btn.type === "phone" ? <Phone size={10} /> : <Sparkles size={10} />}
-                                    <span>{btn.text}</span>
-                                  </div>
-                                ))}
-                              </div>
+                {selectedTpl && templateVars.length > 0 && (
+                  <fieldset className="space-y-3">
+                    <legend className="mb-2 text-sm font-medium text-gray-700">Variables</legend>
+                    {templateVars.map((v) => {
+                      const source = varSources[v] || "";
+                      return (
+                        <div key={v} className="grid grid-cols-[72px_1fr] items-start gap-2">
+                          <span className="pt-2 font-mono text-xs text-gray-600">{`{{${v}}}`}</span>
+                          <div className="space-y-2">
+                            <select aria-label={`Source for variable ${v}`} className="input input-sm" value={source} onChange={(e) => setVariableSource(v, e.target.value)}>
+                              <option value="">Choose a value…</option>
+                              <option value="contact_name">Contact name</option>
+                              <option value="contact_phone">Contact phone</option>
+                              <option value="static">Custom text</option>
+                            </select>
+                            {source === "static" && (
+                              <input
+                                aria-label={`Custom text for variable ${v}`}
+                                className="input input-sm"
+                                value={varValues[v] || ""}
+                                onChange={(e) => setVarValues((prev) => ({ ...prev, [v]: e.target.value }))}
+                                placeholder="Same text for every contact"
+                                autoFocus
+                              />
                             )}
                           </div>
                         </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
-
-          {/* Free text */}
-          {msgType === "text" && (
-            <div className="mb-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-semibold text-slate-700">Custom Message</label>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setFreeText((prev) => prev + " {{name}}")}
-                    className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60 rounded-md px-2 py-0.5 hover:bg-emerald-100 transition-all"
-                    title="Insert recipient's dynamic contact name"
-                  >
-                    + {"{{name}}"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFreeText((prev) => prev + " {{phone}}")}
-                    className="text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 rounded-md px-2 py-0.5 hover:bg-slate-200 transition-all"
-                    title="Insert recipient's phone number"
-                  >
-                    + {"{{phone}}"}
-                  </button>
-                </div>
+                      );
+                    })}
+                  </fieldset>
+                )}
               </div>
-              <textarea
-                value={freeText}
-                onChange={(e) => setFreeText(e.target.value)}
-                placeholder="Hello {{name}}, you are invited to the AI Research Summit..."
-                rows={5}
-                className="input resize-none text-xs font-medium leading-relaxed"
-              />
-
-              {/* Live Personalization Preview */}
-              {freeText && (
-                <div className="p-2.5 bg-slate-50 border border-slate-200/60 rounded-xl text-[11px] text-slate-700 space-y-1">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Live Personalization Preview:</span>
-                  <p className="font-medium italic text-slate-800 break-words whitespace-pre-wrap">
-                    "{freeText.replace(/\{\{name\}\}/gi, "John Doe").replace(/\{\{phone\}\}/gi, "+919876543210")}"
-                  </p>
+            ) : (
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label htmlFor="free-text" className="text-sm font-medium text-gray-700">
+                    Message
+                  </label>
+                  <div className="flex gap-1">
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFreeText((prev) => `${prev}${prev && !prev.endsWith(" ") ? " " : ""}{{name}}`)}>
+                      + Name
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFreeText((prev) => `${prev}${prev && !prev.endsWith(" ") ? " " : ""}{{phone}}`)}>
+                      + Phone
+                    </button>
+                  </div>
                 </div>
-              )}
+                <textarea
+                  id="free-text"
+                  rows={5}
+                  className="input resize-y"
+                  value={freeText}
+                  onChange={(e) => setFreeText(e.target.value)}
+                  placeholder="Hello {{name}}, you're invited to…"
+                />
+                <p className="hint">{"{{name}}"} and {"{{phone}}"} are replaced with each recipient's details.</p>
+              </div>
+            )}
 
-              <p className="text-[10px] text-slate-400">
-                💡 Placeholders like <code className="text-emerald-700 font-bold">{"{{name}}"}</code> automatically replace with each recipient's actual name from your contact list!
-              </p>
-            </div>
-          )}
+            {(selectedTpl || msgType === "text") && (
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-700">Preview</span>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowPreviewModal(true)}>
+                    <Maximize2 size={13} aria-hidden="true" />
+                    Full screen
+                  </button>
+                </div>
+                <WhatsAppPreview body={previewBody} headerImageUrl={previewImage} buttons={selectedTpl?.buttons || []} />
+              </div>
+            )}
 
-          {/* Media Attachment */}
-          <div className="mb-4">
-            <label className="block text-xs text-slate-400 mb-1.5">
-              {msgType === "template" ? "Template Header Image / Campaign Media" : "Campaign Media (Optional)"}
-            </label>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => mediaInputRef.current.click()}
-                className="btn-secondary text-xs flex items-center gap-1.5 py-1.5"
-                disabled={uploadingMedia}
-              >
-                {uploadingMedia ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-                {campaignMedia || campaignMediaUrl ? "Change Image" : "Attach Image"}
-              </button>
-              <input
-                ref={mediaInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleMediaUpload}
-                className="hidden"
-              />
-              {(campaignMedia || campaignMediaUrl) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCampaignMedia(null);
-                    setCampaignMediaUrl("");
-                  }}
-                  className="text-slate-400 hover:text-red-500 text-xs font-semibold px-1"
-                  title="Remove media"
-                >
-                  <X size={14} />
+            <div>
+              <span className="label">{msgType === "template" ? "Header image" : "Image (optional)"}</span>
+              {campaignMediaUrl ? (
+                <div className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2">
+                  <ImagePlus size={16} className="shrink-0 text-gray-400" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate text-13 text-gray-700" title={campaignMediaUrl}>
+                    {campaignMedia?.name || "Image from template"}
+                  </span>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => mediaInputRef.current?.click()} disabled={uploadingMedia}>
+                    Change
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm btn-icon"
+                    aria-label="Remove image"
+                    onClick={() => {
+                      setCampaignMedia(null);
+                      setCampaignMediaUrl("");
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="btn btn-secondary" onClick={() => mediaInputRef.current?.click()} disabled={uploadingMedia}>
+                  {uploadingMedia ? <Spinner size={14} /> : <ImagePlus size={14} aria-hidden="true" />}
+                  {uploadingMedia ? "Uploading…" : "Attach image"}
                 </button>
               )}
+              <input ref={mediaInputRef} type="file" accept="image/*" onChange={handleMediaUpload} className="sr-only" />
             </div>
-            {campaignMediaUrl && (
-              <p className="text-[10px] text-wa-green mt-1 truncate max-w-[240px]">
-                📷 Image attached ({campaignMedia?.name || "URL set"})
-              </p>
-            )}
-          </div>
 
-          {/* Schedule for Later Option */}
-          <div className="mb-4 p-3 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 cursor-pointer">
-                <Calendar size={14} className="text-wa-green" />
+            <div>
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-700">
+                <input type="checkbox" className="checkbox" checked={isScheduled} onChange={(e) => setIsScheduled(e.target.checked)} />
                 Schedule for later
               </label>
-              <input
-                type="checkbox"
-                checked={isScheduled}
-                onChange={(e) => setIsScheduled(e.target.checked)}
-                className="rounded text-wa-green focus:ring-wa-green cursor-pointer"
-              />
+              {isScheduled && (
+                <div className="mt-2">
+                  <input
+                    aria-label="Scheduled date and time"
+                    type="datetime-local"
+                    className="input"
+                    value={scheduledTime}
+                    onChange={(e) => setScheduledTime(e.target.value)}
+                  />
+                  <p className="hint">Messages wait in the queue and start sending at this time.</p>
+                </div>
+              )}
             </div>
-
-            {isScheduled && (
-              <div className="pt-1 space-y-1">
-                <label className="block text-[10px] text-slate-500 font-medium">Select Date & Time</label>
-                <input
-                  type="datetime-local"
-                  value={scheduledTime}
-                  onChange={(e) => setScheduledTime(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-xl py-1.5 px-3 text-xs focus:outline-none focus:border-wa-green text-slate-700 font-mono"
-                />
-                <p className="text-[9px] text-slate-400">
-                  Messages will sit safely in queue and start sending automatically at the specified time.
-                </p>
-              </div>
-            )}
           </div>
 
-          {/* Error */}
-          {error && (
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 mb-4">
-              <AlertCircle size={14} className="text-red-400 shrink-0" />
-              <p className="text-xs text-red-400">{error}</p>
-            </div>
-          )}
-
-          {/* Progress */}
-          {sending && progress && (
-            <div className="mb-4 p-3 rounded-lg bg-surface-hover border border-surface-border">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-slate-400">Sending...</span>
-                <span className="text-xs text-wa-green">{progress.progress}%</span>
+          <div className="sticky bottom-0 space-y-3 border-t border-gray-200 bg-white px-4 py-4 sm:px-6">
+            {error && <ErrorState message={error} />}
+            {sending && progress && (
+              <div>
+                <div className="mb-1.5 flex justify-between text-xs text-gray-600">
+                  <span className="truncate">Sending… last: {progress.phone}</span>
+                  <span className="tabular-nums">{progress.progress}%</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-gray-100" role="progressbar" aria-valuenow={progress.progress} aria-valuemin={0} aria-valuemax={100}>
+                  <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${progress.progress}%` }} />
+                </div>
               </div>
-              <div className="h-1.5 bg-surface-border rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-wa-green rounded-full transition-all duration-300"
-                  style={{ width: `${progress.progress}%` }}
-                />
-              </div>
-              <p className="text-xs text-slate-500 mt-2">
-                Last: {progress.phone} — {progress.status}
-              </p>
-            </div>
-          )}
-
-          {/* Send button */}
-          <button
-            onClick={handleSend}
-            disabled={sending || selectedPhones.length === 0}
-            className="btn-primary w-full justify-center disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {sending ? (
-              <><Loader2 size={14} className="animate-spin" /> {isScheduled ? "Scheduling..." : "Sending..."}</>
-            ) : isScheduled ? (
-              <><Clock size={14} /> Schedule for {selectedPhones.length} contacts</>
-            ) : (
-              <><Send size={14} /> Send to {selectedPhones.length} contacts</>
             )}
-          </button>
-        </div>
-
-        {/* Note */}
-        <div className="mt-auto p-3 rounded-lg bg-[#F3FAF4] border border-surface-border">
-          <p className="text-xs text-slate-500 leading-relaxed">
-            <strong className="text-slate-700">Universal CSV Support:</strong><br />
-            Supports all delimiters (comma, semicolon, tab), Excel exports (scientific notation), separate First/Last Name columns, and headerless CSVs.
-          </p>
-        </div>
+            <button type="button" onClick={handleSend} disabled={sending || selectedPhones.length === 0} className="btn btn-primary w-full">
+              {sending ? (
+                <>
+                  <Spinner size={14} className="text-white" />
+                  {isScheduled ? "Scheduling…" : "Sending…"}
+                </>
+              ) : (
+                <>
+                  <Send size={14} aria-hidden="true" />
+                  {isScheduled ? "Schedule" : "Send"} to {formatNumber(selectedPhones.length)} contact{selectedPhones.length === 1 ? "" : "s"}
+                </>
+              )}
+            </button>
+          </div>
+        </aside>
       </div>
 
-      {/* Full Screen WhatsApp Chat Preview Modal */}
-      {showPreviewModal && selectedTemplate && (() => {
-        const tpl = templates.find(t => t.content_sid === selectedTemplate || t.name === selectedTemplate || (t._id || t.id) === selectedTemplate);
-        if (!tpl) return null;
-        const previewHeaderImg = campaignMediaUrl || tpl.header_image_url || tpl.headerImageUrl;
+      <Dialog open={showPreviewModal} onClose={() => setShowPreviewModal(false)} title={selectedTpl ? `Preview · ${selectedTpl.name}` : "Preview"} description="Dynamic values show sample data." size="xl">
+        <div className="mx-auto max-w-[420px]">
+          <WhatsAppPreview body={previewBody} headerImageUrl={previewImage} buttons={selectedTpl?.buttons || []} size="lg" />
+        </div>
+      </Dialog>
 
-        return (
-          <div className="fixed inset-0 z-[80] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
-            <div className="bg-slate-900 text-white rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl border border-slate-800 overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between gap-4 bg-slate-900/90 shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
-                    <Smartphone size={16} />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                      WhatsApp Message Preview ({tpl.name})
-                    </h3>
-                    <p className="text-xs text-slate-400">See exact visual appearance of message before dispatching</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowPreviewModal(false)}
-                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-6 bg-[#0b141a] flex items-center justify-center">
-                <div className="w-full max-w-[420px] rounded-3xl bg-[#efeae2] border border-slate-700 shadow-2xl overflow-hidden flex flex-col my-auto">
-                  <div className="bg-[#008069] text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-md">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-xs font-bold text-white">
-                        OG
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold flex items-center gap-1">
-                          <span>OneGrasp</span>
-                          <span className="text-[9px] bg-emerald-400/30 text-emerald-100 rounded-full px-1 font-bold">✓</span>
-                        </div>
-                        <div className="text-[9px] text-emerald-100/90">Official Business Account</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 flex flex-col justify-end gap-3 bg-[#efeae2] bg-repeat min-h-[380px]" style={{ backgroundImage: "radial-gradient(#cbd5e1 0.8px, transparent 0.8px)", backgroundSize: "18px 18px" }}>
-                    <div className="bg-white rounded-2xl rounded-tr-xs shadow-lg border border-slate-200 max-w-[98%] w-full self-end overflow-hidden flex flex-col">
-                      {previewHeaderImg && (
-                        <div className="w-full bg-slate-900/5 border-b border-slate-100 flex items-center justify-center overflow-hidden">
-                          <img src={previewHeaderImg} alt="Header" className="w-full h-full object-cover max-h-48" />
-                        </div>
-                      )}
-
-                      <div className="p-4 space-y-2">
-                        <p className="text-[13px] leading-relaxed text-slate-800 font-normal whitespace-pre-wrap break-words">
-                          {renderTemplateBodyPreview(tpl)}
-                        </p>
-                        <div className="flex items-center justify-end gap-1 text-[10px] text-slate-400 select-none pt-1">
-                          <span>{new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-                          <span className="text-[#53bdeb] font-bold text-[11px]">✓✓</span>
-                        </div>
-                      </div>
-
-                      {tpl.buttons && tpl.buttons.length > 0 && (
-                        <div className="border-t border-slate-150 bg-white divide-y divide-slate-150">
-                          {tpl.buttons.map((btn, index) => (
-                            <div key={index} className="py-2.5 px-3 text-center text-xs font-semibold text-[#00a884] flex items-center justify-center gap-1.5">
-                              {btn.type === "URL" ? <ExternalLink size={12} /> : btn.type === "phone" ? <Phone size={12} /> : <Sparkles size={12} />}
-                              <span>{btn.text}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      <ImportContactsDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        defaultSet={filterSet}
+        customSets={customSets}
+        onImported={() => {
+          loadContacts();
+          loadContactSets();
+        }}
+      />
     </div>
   );
 }

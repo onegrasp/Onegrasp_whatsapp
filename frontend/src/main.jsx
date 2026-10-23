@@ -36,30 +36,25 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-[#F5FEF7] p-6 text-center font-sans select-none">
-          <div className="max-w-md bg-white border border-rose-200 rounded-3xl p-8 shadow-xl">
-            <div className="w-12 h-12 bg-rose-100 rounded-full flex items-center justify-center mx-auto mb-4 text-rose-600 font-bold text-xl">
-              🛡️
-            </div>
-            <h2 className="text-lg font-bold text-slate-800 mb-2">Application Notice</h2>
-            <p className="text-xs text-slate-500 mb-6">
-              An unexpected display issue occurred in this section. You can return safely to your dashboard.
+        <div className="flex min-h-dvh items-center justify-center bg-gray-50 px-4">
+          <div className="panel w-full max-w-md p-6 shadow-sm">
+            <h1 className="text-base font-semibold text-gray-900">Something went wrong</h1>
+            <p className="mt-1 text-sm text-gray-500">
+              This page hit an unexpected error. Your data is safe — reload the page or return to the dashboard.
             </p>
-            <div className="flex items-center justify-center gap-3">
+            <div className="mt-6 flex flex-wrap gap-2">
               <button
-                onClick={this.handleResetToDashboard}
-                className="bg-wa-green hover:bg-wa-dark text-slate-900 font-semibold px-5 py-2.5 rounded-2xl text-xs transition-all shadow-md active:scale-[0.98]"
-              >
-                Go to Dashboard
-              </button>
-              <button
+                type="button"
                 onClick={() => {
                   this.setState({ hasError: false, error: null });
                   window.location.reload();
                 }}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-5 py-2.5 rounded-2xl text-xs transition-all active:scale-[0.98]"
+                className="btn btn-secondary"
               >
-                Reload Session
+                Reload page
+              </button>
+              <button type="button" onClick={this.handleResetToDashboard} className="btn btn-primary">
+                Go to dashboard
               </button>
             </div>
           </div>

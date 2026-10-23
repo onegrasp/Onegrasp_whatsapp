@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AlertCircle } from "lucide-react";
 import { SocketProvider } from "./context/SocketContext";
-import Sidebar from "./components/Sidebar";
+import AppShell from "./components/AppShell";
+import { FeedbackProvider } from "./components/feedback";
+import { SettingsProvider } from "./components/SettingsDialog";
 import Dashboard from "./pages/Dashboard";
 import BulkSender from "./pages/BulkSender";
 import Chats from "./pages/Chats";
@@ -9,7 +12,7 @@ import Contacts from "./pages/Contacts";
 import Campaigns from "./pages/Campaigns";
 import Templates from "./pages/Templates";
 import Logs from "./pages/Logs";
-import { Lock, LogIn, Sparkles } from "lucide-react";
+import NotFound from "./pages/NotFound";
 import { login as apiLogin } from "./services/api";
 
 function Login({ onLoginSuccess }) {
@@ -23,7 +26,7 @@ function Login({ onLoginSuccess }) {
     setError("");
     try {
       const res = await apiLogin(password);
-      // Store in sessionStorage so closing tab/browser terminates the session immediately
+      // Stored in sessionStorage so closing the tab ends the session.
       sessionStorage.setItem("token", res.data.token);
       onLoginSuccess(res.data.token);
     } catch (err) {
@@ -36,57 +39,52 @@ function Login({ onLoginSuccess }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#F5FEF7] p-4 font-sans">
-      <div className="w-full max-w-md bg-white border border-[#D7EAD6] rounded-3xl p-8 shadow-xl relative overflow-hidden">
-        {/* Decorative background gradients */}
-        <div className="absolute -top-10 -right-10 w-32 h-32 bg-wa-green/10 rounded-full blur-2xl" />
-        <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-wa-dark/10 rounded-full blur-2xl" />
-
-        <div className="text-center mb-8 relative">
-          <div className="w-16 h-16 bg-wa-green/15 rounded-full flex items-center justify-center mx-auto mb-4 border border-wa-green/20">
-            <Lock className="text-wa-dark" size={24} />
+    <div className="flex min-h-dvh items-center justify-center bg-gray-50 px-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex items-center gap-2.5">
+          <div className="grid h-8 w-8 place-items-center rounded-md bg-brand-600 text-xs font-semibold text-white" aria-hidden="true">
+            OG
           </div>
-          <h2 className="text-xl font-bold text-slate-800 flex items-center justify-center gap-1.5">
-            <Sparkles size={18} className="text-wa-green animate-pulse" />
-            OneGrasp Security Console
-          </h2>
-          <p className="text-xs text-slate-400 mt-1 font-medium">Session authentication required</p>
+          <span className="text-sm font-semibold text-gray-900">OneGrasp</span>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5 relative">
-          {error && (
-            <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs text-center font-semibold animate-shake">
-              ⚠️ {error}
-            </div>
-          )}
-          
-          <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wide">
-              Admin Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-wa-green focus:bg-white transition-all font-mono"
-            />
-          </div>
+        <div className="panel p-6 shadow-sm">
+          <h1 className="text-lg font-semibold text-gray-900">Sign in</h1>
+          <p className="mt-1 text-sm text-gray-500">Enter the admin password to open the console.</p>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-wa-green hover:bg-wa-dark text-slate-900 font-semibold px-4 py-3 rounded-2xl transition-all flex items-center justify-center gap-2 text-sm shadow-md active:scale-[0.98] disabled:opacity-55 disabled:cursor-not-allowed"
-          >
-            {loading ? "Authenticating..." : (
-              <>
-                <LogIn size={16} />
-                Access Console
-              </>
+          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+            <div>
+              <label htmlFor="password" className="label">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoFocus
+                autoComplete="current-password"
+                className="input"
+                aria-invalid={Boolean(error)}
+                aria-describedby={error ? "login-error" : undefined}
+              />
+            </div>
+
+            {error && (
+              <p id="login-error" role="alert" className="flex items-start gap-2 text-sm text-red-600">
+                <AlertCircle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                {error}
+              </p>
             )}
-          </button>
-        </form>
+
+            <button type="submit" disabled={loading} className="btn btn-primary w-full">
+              {loading ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
+        </div>
+
+        <p className="mt-4 text-center text-xs text-gray-500">The first sign-in after a quiet period can take up to a minute while the server starts.</p>
       </div>
     </div>
   );
@@ -108,21 +106,23 @@ export default function App() {
   return (
     <SocketProvider>
       <BrowserRouter>
-        <div className="flex h-screen overflow-hidden bg-[#F5FEF7]">
-          <Sidebar onLogout={handleLogout} />
-          <main className="flex-1 overflow-hidden">
-            <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/bulk" element={<BulkSender />} />
-              <Route path="/chats" element={<Chats />} />
-              <Route path="/contacts" element={<Contacts />} />
-              <Route path="/campaigns" element={<Campaigns />} />
-              <Route path="/templates" element={<Templates />} />
-              <Route path="/logs" element={<Logs />} />
-            </Routes>
-          </main>
-        </div>
+        <FeedbackProvider>
+          <SettingsProvider>
+            <AppShell onLogout={handleLogout}>
+              <Routes>
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/bulk" element={<BulkSender />} />
+                <Route path="/chats" element={<Chats />} />
+                <Route path="/contacts" element={<Contacts />} />
+                <Route path="/campaigns" element={<Campaigns />} />
+                <Route path="/templates" element={<Templates />} />
+                <Route path="/logs" element={<Logs />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </AppShell>
+          </SettingsProvider>
+        </FeedbackProvider>
       </BrowserRouter>
     </SocketProvider>
   );

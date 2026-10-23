@@ -8,6 +8,7 @@ const templateSyncWorker = require("./templateSyncWorker");
 const mediaWorker = require("./mediaWorker");
 const analyticsWorker = require("./analyticsWorker");
 const retryWorker = require("./retryWorker");
+const statusSyncWorker = require("./statusSyncWorker");
 const { getIo } = require("../socket");
 const logger = require("../utils/logger");
 
@@ -47,6 +48,7 @@ const start = (socketIo) => {
   recoverStaleJobs();
   setInterval(cleanupOldJobs, 12 * 60 * 60 * 1000);
   setInterval(recoverStaleJobs, 5 * 60 * 1000);
+  statusSyncWorker.start();
 };
 
 const stop = () => {
@@ -54,6 +56,7 @@ const stop = () => {
   if (workerLoopTimeout) {
     clearTimeout(workerLoopTimeout);
   }
+  statusSyncWorker.stop();
   logger.info("Specialized Queue worker dispatcher stopped");
 };
 

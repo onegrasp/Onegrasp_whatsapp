@@ -53,6 +53,8 @@ const messageService = {
       status: m.status,
       messageId: m.message_id,
       errorDetails: m.error_details,
+      mediaUrl: m.media_url || "",
+      templateName: m.template_name || "",
       timestamp: m.timestamp,
     }));
 

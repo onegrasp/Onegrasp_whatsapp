@@ -1,68 +1,121 @@
 const contactRepository = require("../repositories/contactRepository");
-const { parseCSV } = require("../utils/csvParser");
+const { parseContactsFile } = require("../utils/csvParser");
+const { validateAndFormatE164, applyCountryCode } = require("../utils/phone");
 const AppError = require("../errors/AppError");
+
+const MAX_REPORTED_ISSUES = 200;
+
+const cleanSetName = (set) =>
+  set && set !== "all" && set !== "none" ? set.trim().toLowerCase().replace(/\s+/g, "_") : null;
+
+// Names that were auto-filled rather than entered, so a real name from an
+// upload may replace them.
+const isPlaceholderName = (name, phone) =>
+  !name || name === phone || ["unknown", "customer", "valued customer"].includes(String(name).trim().toLowerCase());
 
 const contactService = {
   async uploadContacts(fileBuffer, targetSet) {
-    const parsedContacts = await parseCSV(fileBuffer);
+    const { contacts: parsed, issues, totalRows, phoneColumnFound } = await parseContactsFile(fileBuffer);
 
-    if (parsedContacts.length === 0) {
-      throw new AppError("No valid contacts found in spreadsheet file", 400, "validation_error");
+    if (totalRows === 0) {
+      throw new AppError("The file has no rows to import.", 400, "validation_error");
+    }
+    if (!phoneColumnFound) {
+      throw new AppError("Could not find a phone number column. Add a header named Phone (and optionally Name and Country Code).", 400, "validation_error");
     }
 
-    const existingPhones = await contactRepository.getAllPhoneNumbers();
-    const dbPhoneSet = new Set(existingPhones || []);
+    const cleanTargetSet = cleanSetName(targetSet);
 
-    let added = 0;
-    let duplicates = 0;
-    let skipped = 0;
-    const fileSeenPhones = new Set();
+    // Numbers already saved are not duplicated or overwritten. They are
+    // reported, and added to the chosen set if there is one.
+    const existingRows = await contactRepository.findActiveByPhones(parsed.map((c) => c.phone));
+    const existingByPhone = new Map(existingRows.map((c) => [c.phone, c]));
 
-    const cleanTargetSet = targetSet && targetSet !== "all" && targetSet !== "none"
-      ? targetSet.trim().toLowerCase().replace(/\s+/g, "_")
-      : null;
+    const toInsert = [];
+    const alreadySaved = [];
+    for (const c of parsed) {
+      const existing = existingByPhone.get(c.phone);
+      if (existing) alreadySaved.push({ ...c, existing });
+      else toInsert.push(c);
+    }
 
-    for (const contact of parsedContacts) {
-      try {
-        const phone = contact.phone;
-        const assignedLabel = cleanTargetSet || contact.label || "none";
+    const failedInserts = await contactRepository.insertMany(
+      toInsert.map((c) => ({
+        phone: c.phone,
+        name: c.name || c.phone,
+        label: cleanTargetSet || "none",
+        tags: cleanTargetSet ? [cleanTargetSet] : [],
+        deleted_at: null,
+        updated_at: new Date().toISOString(),
+      }))
+    );
+    const failedPhones = new Set(failedInserts.map((f) => f.phone));
 
-        if (dbPhoneSet.has(phone) || fileSeenPhones.has(phone)) {
-          duplicates++;
-        } else {
-          added++;
-          fileSeenPhones.add(phone);
-          dbPhoneSet.add(phone);
-        }
-
-        await contactRepository.upsert(phone, contact.name, assignedLabel);
-      } catch (err) {
-        skipped++;
+    if (cleanTargetSet && alreadySaved.length > 0) {
+      await contactRepository.assignSet(alreadySaved.map((c) => c.existing.id), cleanTargetSet);
+    }
+    for (const c of alreadySaved) {
+      if (c.name && isPlaceholderName(c.existing.name, c.phone)) {
+        await contactRepository.updateName(c.existing.id, c.name).catch(() => {});
       }
     }
 
+    const allIssues = [
+      ...issues,
+      ...alreadySaved.map((c) => ({
+        row: c.row,
+        name: c.name,
+        value: c.phone,
+        reason: cleanTargetSet
+          ? `Already saved as "${c.existing.name}"; added to this set`
+          : `Already saved as "${c.existing.name}"`,
+        type: "existing",
+      })),
+      ...toInsert
+        .filter((c) => failedPhones.has(c.phone))
+        .map((c) => ({
+          row: c.row,
+          name: c.name,
+          value: c.phone,
+          reason: `Could not be saved: ${failedInserts.find((f) => f.phone === c.phone).message}`,
+          type: "invalid",
+        })),
+    ].sort((a, b) => a.row - b.row);
+
+    const count = (type) => allIssues.filter((i) => i.type === type).length;
+    const duplicatesInFile = count("duplicate");
+
     return {
       message: "Upload complete",
-      added,
-      duplicates,
-      skipped,
-      total: parsedContacts.length,
+      total: totalRows,
+      added: toInsert.length - failedPhones.size,
+      existing: alreadySaved.length,
+      duplicatesInFile,
+      invalid: count("invalid"),
+      warnings: count("warning"),
+      // Kept for older clients: everything that was not newly added because the number was already known.
+      duplicates: duplicatesInFile + alreadySaved.length,
+      skipped: count("invalid") + duplicatesInFile,
       targetSet: cleanTargetSet || "none",
+      issues: allIssues.slice(0, MAX_REPORTED_ISSUES),
+      issuesTotal: allIssues.length,
     };
   },
 
-  async createSingleContact({ name, phone, set, label }) {
-    const { validateAndFormatE164 } = require("../utils/phone");
-    const { isValid, formatted } = validateAndFormatE164(phone);
+  async createSingleContact({ name, phone, countryCode, set, label }) {
+    const composed = countryCode ? applyCountryCode(countryCode, phone) : phone;
+    const { isValid, formatted } = validateAndFormatE164(composed);
 
     if (!isValid) {
-      throw new AppError("Invalid phone number format", 400, "validation_error");
+      throw new AppError("Enter a valid phone number, including the country code.", 400, "validation_error");
     }
 
-    const cleanSet = set && set !== "all" && set !== "none"
-      ? set.trim().toLowerCase().replace(/\s+/g, "_")
-      : label || "none";
+    const existing = await contactRepository.findByPhone(formatted);
+    if (existing) {
+      throw new AppError(`${formatted} is already saved as "${existing.name}".`, 409, "duplicate_contact");
+    }
 
+    const cleanSet = cleanSetName(set) || label || "none";
     const contactName = (name || "").trim() || formatted;
 
     const contact = await contactRepository.upsert(formatted, contactName, cleanSet);

@@ -333,6 +333,44 @@ const contactRepository = {
     return ids.length;
   },
 
+  // Active (not deleted) contacts for the given phones, queried in chunks so
+  // large uploads don't exceed URL length limits.
+  async findActiveByPhones(phones) {
+    const unique = Array.from(new Set(phones || []));
+    const rows = [];
+    for (let i = 0; i < unique.length; i += 300) {
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("id, phone, name, label, tags")
+        .in("phone", unique.slice(i, i + 300))
+        .is("deleted_at", null);
+      if (error) throw error;
+      rows.push(...(data || []));
+    }
+    return rows;
+  },
+
+  // Inserts new contacts in batches. Upserting on phone also restores rows
+  // that were soft-deleted earlier. Returns the phones that could not be saved.
+  async insertMany(contacts) {
+    const failed = [];
+    for (let i = 0; i < contacts.length; i += 500) {
+      const chunk = contacts.slice(i, i + 500);
+      const { error } = await supabase.from("contacts").upsert(chunk, { onConflict: "phone" });
+      if (!error) continue;
+      for (const row of chunk) {
+        const { error: rowError } = await supabase.from("contacts").upsert(row, { onConflict: "phone" });
+        if (rowError) failed.push({ phone: row.phone, message: rowError.message });
+      }
+    }
+    return failed;
+  },
+
+  async updateName(id, name) {
+    const { error } = await supabase.from("contacts").update({ name }).eq("id", id);
+    if (error) throw error;
+  },
+
   async getAllPhoneNumbers() {
     const { data, error } = await supabase
       .from("contacts")
