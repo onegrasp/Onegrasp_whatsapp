@@ -2,6 +2,7 @@ const templateRepository = require("../repositories/templateRepository");
 const { getTwilioClient } = require("../integrations/twilio/client");
 const logger = require("../utils/logger");
 const AppError = require("../errors/AppError");
+const { getIo } = require("../socket");
 
 function extractVariables(text) {
   if (!text) return [];
@@ -242,7 +243,7 @@ const templateService = {
     const client = await getTwilioClient();
 
     logger.info(`Fetching approval status for Content SID ${template.content_sid}...`);
-    let status = "pending";
+    let status = null;
     let reason = "";
 
     try {
@@ -251,23 +252,93 @@ const templateService = {
         .approvalFetch.get()
         .fetch();
 
-      status = approval.status || approval.whatsapp?.status || "pending";
+      status = approval.status || approval.whatsapp?.status || null;
       reason = approval.rejectionReason || approval.whatsapp?.rejection_reason || "";
     } catch (err) {
+      // Never overwrite a known status (e.g. "approved") because Twilio
+      // couldn't be reached.
       logger.warn(`Failed to fetch approval status for SID ${template.content_sid}:`, { error: err });
+      throw new AppError("Couldn't reach Twilio to check this template's status. Try again in a minute.", 502, "provider_unavailable");
     }
 
+    if (!status) {
+      return { status: template.status, rejectionReason: template.rejection_reason || "", _id: template.id, changed: false };
+    }
+
+    const changed = status !== template.status;
     const updated = await templateRepository.update(id, {
       status: status,
       rejection_reason: reason,
       updated_at: new Date().toISOString(),
     });
 
+    if (changed) {
+      logger.info(`Template "${template.name}" approval status changed: ${template.status} -> ${status}`);
+      const io = getIo();
+      if (io) io.emit("template_update", { id: updated.id, name: updated.name, status: updated.status });
+    }
+
     return {
       status: updated.status,
       rejectionReason: updated.rejection_reason,
       _id: updated.id,
+      changed,
     };
+  },
+
+  // Re-checks every template still waiting for WhatsApp's decision. Meta's
+  // approval email often arrives before Twilio reflects it, so this runs on a
+  // timer instead of relying on someone clicking "Check status".
+  async syncAwaitingTemplates() {
+    const waiting = await templateRepository.findAwaitingApproval();
+    const changed = [];
+    for (const template of waiting) {
+      try {
+        const result = await this.syncTemplateStatus(template.id);
+        if (result.changed) changed.push({ name: template.name, status: result.status });
+      } catch (err) {
+        logger.warn(`Automatic status check failed for template "${template.name}"`, { error: err.message });
+      }
+    }
+    return { checked: waiting.length, changed };
+  },
+
+  /**
+   * Can this template be sent as a campaign right now? A template still marked
+   * pending is re-checked live first, so a fresh approval isn't missed.
+   * Unknown names are allowed through (Twilio has the final say).
+   */
+  async checkSendable(templateNameOrSid) {
+    if (!templateNameOrSid) return { ok: true };
+    let tpl = await templateRepository.findByName(templateNameOrSid);
+    if (!tpl) tpl = await templateRepository.findByContentSid(templateNameOrSid);
+    if (!tpl) tpl = await templateRepository.findById(templateNameOrSid).catch(() => null);
+    if (!tpl || tpl.status === "approved") return { ok: true, template: tpl };
+
+    let status = tpl.status;
+    let reason = tpl.rejection_reason || "";
+    if (tpl.content_sid && (status === "pending" || status === "received" || !status)) {
+      try {
+        const fresh = await this.syncTemplateStatus(tpl.id);
+        status = fresh.status;
+        reason = fresh.rejectionReason || reason;
+      } catch (e) {
+        // Keep the stored status if Twilio can't be reached.
+      }
+      if (status === "approved") return { ok: true, template: { ...tpl, status } };
+    }
+
+    let message;
+    if (!tpl.content_sid || !status || status === "draft" || status === "unsubmitted") {
+      message = `Template "${tpl.name}" hasn't been submitted for WhatsApp approval yet. Submit it on the Templates page first.`;
+    } else if (status === "pending" || status === "received") {
+      message = `Template "${tpl.name}" is still waiting for WhatsApp approval. If Meta's approval email has arrived, it can take a few minutes to show here — the app re-checks automatically every 10 minutes, or click Check status.`;
+    } else if (status === "rejected") {
+      message = `Template "${tpl.name}" was rejected by WhatsApp${reason ? `: ${reason}` : ""}. Edit and resubmit it on the Templates page.`;
+    } else {
+      message = `Template "${tpl.name}" can't be sent right now (WhatsApp status: ${status}).`;
+    }
+    return { ok: false, status, message, template: tpl };
   },
 
   async syncAllTemplates() {

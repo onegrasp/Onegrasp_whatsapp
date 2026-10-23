@@ -8,6 +8,7 @@ const mediaWorker = require("./mediaWorker");
 const analyticsWorker = require("./analyticsWorker");
 const retryWorker = require("./retryWorker");
 const statusSyncWorker = require("./statusSyncWorker");
+const templateApprovalWorker = require("./templateApprovalWorker");
 const { refreshCampaignProgress } = require("../services/campaignProgress");
 const { getSafeguards, quietHoursOptions, hasQuietHoursOverride } = require("../services/sendingPolicy");
 const { quietHoursEnd } = require("../utils/quietHours");
@@ -114,6 +115,7 @@ const start = () => {
   setInterval(cleanupOldJobs, 12 * 60 * 60 * 1000);
   setInterval(recoverStaleJobs, 5 * 60 * 1000);
   statusSyncWorker.start();
+  templateApprovalWorker.start();
 };
 
 const stop = () => {
@@ -122,6 +124,7 @@ const stop = () => {
     clearTimeout(workerLoopTimeout);
   }
   statusSyncWorker.stop();
+  templateApprovalWorker.stop();
   logger.info("Specialized Queue worker dispatcher stopped");
 };
 

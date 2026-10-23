@@ -2,6 +2,7 @@ const supabase = require("../utils/supabase");
 const logger = require("../utils/logger");
 const { validateTemplateParameters } = require("../utils/templateHelper");
 const templateRepository = require("../repositories/templateRepository");
+const templateService = require("../services/templateService");
 const {
   analyzeRecipients,
   getDailyUsage,
@@ -31,8 +32,11 @@ const consentMissing = (analysis) =>
  */
 const campaignPreflight = async (req, res, next) => {
   try {
-    const { phones = [], type = "template", skipRecentDays, requireConsent = false, scheduledAt = null } = req.body || {};
+    const { phones = [], type = "template", templateName, skipRecentDays, requireConsent = false, scheduledAt = null } = req.body || {};
     if (!Array.isArray(phones)) return res.status(400).json({ error: "phones must be an array" });
+
+    // A template WhatsApp hasn't approved will be rejected for every recipient.
+    const templateCheck = type === "template" && templateName ? await templateService.checkSendable(templateName) : { ok: true };
 
     const safeguards = await getSafeguards();
     const cooldownDays = resolveCooldown(skipRecentDays, safeguards);
@@ -45,6 +49,8 @@ const campaignPreflight = async (req, res, next) => {
     const start = adjustForQuietHours(requestedStart, safeguards);
 
     res.json({
+      templateBlocked: templateCheck.ok ? null : templateCheck.message,
+      templateStatus: templateCheck.status || templateCheck.template?.status || null,
       selected: phones.length,
       willSend: analysis.sendable.length,
       invalidFormat: analysis.invalidFormat.length,
@@ -151,6 +157,15 @@ const sendBulk = async (req, res) => {
       }
     } catch (valErr) {
       logger.warn("Could not pre-validate template parameters:", { error: valErr.message });
+    }
+  }
+
+  if (type === "template" && templateName) {
+    try {
+      const templateCheck = await templateService.checkSendable(templateName);
+      if (!templateCheck.ok) return res.status(400).json({ error: templateCheck.message, templateStatus: templateCheck.status });
+    } catch (checkErr) {
+      logger.warn("Could not verify template approval before sending:", { error: checkErr.message });
     }
   }
 

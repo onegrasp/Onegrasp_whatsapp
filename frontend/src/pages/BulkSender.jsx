@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ImagePlus, Maximize2, Send, Upload, Users, X } from "lucide-react";
-import { campaignPreflight, getContacts, getContactSets, getTemplates, sendBulkMessages, uploadMediaFile } from "../services/api";
+import { campaignPreflight, getContacts, getContactSets, getTemplates, sendBulkMessages, syncTemplateStatus, uploadMediaFile } from "../services/api";
 import { useSocket } from "../context/SocketContext";
 import { Badge, Dialog, EmptyState, ErrorState, Field, LoadingRows, PageHeader, SegmentedControl, Spinner } from "../components/ui";
 import { useConfirm, useToast } from "../components/feedback";
@@ -334,12 +334,19 @@ export default function BulkSender() {
     socket.on("campaign_progress", onProgress);
     socket.on("campaign_complete", onComplete);
     socket.on("campaign_update", onUpdate);
+    // A template's WhatsApp approval changed (automatic check or another tab).
+    const onTemplateUpdate = (data) => {
+      loadTemplates();
+      if (data?.status === "approved") toast.success(`Template "${data.name}" is now approved and ready to send.`);
+    };
+    socket.on("template_update", onTemplateUpdate);
     return () => {
       socket.off("campaign_progress", onProgress);
       socket.off("campaign_complete", onComplete);
       socket.off("campaign_update", onUpdate);
+      socket.off("template_update", onTemplateUpdate);
     };
-  }, [socket, toast]);
+  }, [socket, toast, loadTemplates]);
 
   const handleMediaUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -356,6 +363,27 @@ export default function BulkSender() {
       toast.error(`Image upload failed: ${errorMessage(err)}`);
     } finally {
       setUploadingMedia(false);
+    }
+  };
+
+  const [checkingTemplate, setCheckingTemplate] = useState(false);
+  // Asks Twilio for the template's latest WhatsApp approval status.
+  const checkTemplateStatus = async () => {
+    if (!selectedTpl) return;
+    setCheckingTemplate(true);
+    try {
+      const res = await syncTemplateStatus(selectedTpl._id || selectedTpl.id);
+      await loadTemplates();
+      if (res.data?.status === "approved") {
+        setError("");
+        toast.success("Template approved. You can send it now.");
+      } else {
+        toast.info(`Still "${res.data?.status || "pending"}". WhatsApp hasn't confirmed it to Twilio yet; try again in a few minutes.`);
+      }
+    } catch (err) {
+      toast.error(errorMessage(err, "Couldn't check the template status."));
+    } finally {
+      setCheckingTemplate(false);
     }
   };
 
@@ -448,6 +476,7 @@ export default function BulkSender() {
     try {
       const res = await campaignPreflight({
         phones: payload.phones,
+        templateName: payload.templateName,
         type: payload.type,
         skipRecentDays: payload.skipRecentDays,
         requireConsent: payload.requireConsent,
@@ -459,6 +488,12 @@ export default function BulkSender() {
       return;
     } finally {
       setChecking(false);
+    }
+
+    if (pre.templateBlocked) {
+      setError(pre.templateBlocked);
+      loadTemplates();
+      return;
     }
 
     if (pre.willSend === 0) {
@@ -728,6 +763,23 @@ export default function BulkSender() {
                   <Field label="Template name" hint="Enter the exact name of an approved template.">
                     {(id) => <input id={id} className="input" value={selectedTemplate} onChange={(e) => setSelectedTemplate(e.target.value)} />}
                   </Field>
+                )}
+
+                {selectedTpl && selectedTpl.status !== "approved" && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-13 text-amber-900">
+                    <p>
+                      {selectedTpl.status === "rejected"
+                        ? "WhatsApp rejected this template. Edit and resubmit it on the Templates page."
+                        : selectedTpl.content_sid || selectedTpl.contentSid
+                          ? "This template is waiting for WhatsApp approval and can't be sent yet. If Meta's approval email has arrived, it can take a few minutes to show here. The app re-checks every 10 minutes."
+                          : "This template hasn't been submitted for WhatsApp approval yet. Submit it on the Templates page first."}
+                    </p>
+                    {(selectedTpl.content_sid || selectedTpl.contentSid) && selectedTpl.status !== "rejected" && (
+                      <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={checkTemplateStatus} disabled={checkingTemplate}>
+                        {checkingTemplate ? "Checking…" : "Check status now"}
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {selectedTpl && templateVars.length > 0 && (

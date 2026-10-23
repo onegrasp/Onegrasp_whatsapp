@@ -13,6 +13,7 @@ import {
 import { Dialog, EmptyState, ErrorState, Field, LoadingRows, Page, PageHeader, SegmentedControl, Sheet, StatusBadge } from "../components/ui";
 import { useConfirm, useToast } from "../components/feedback";
 import WhatsAppPreview from "../components/WhatsAppPreview";
+import { useSocket } from "../context/SocketContext";
 import { errorMessage } from "../lib/format";
 
 const extractVariables = (text) => {
@@ -127,6 +128,19 @@ export default function Templates() {
   useEffect(() => {
     fetchTemplatesList();
   }, []);
+
+  // The server re-checks pending templates every 10 minutes; refresh when one changes.
+  const { socket } = useSocket();
+  useEffect(() => {
+    if (!socket) return;
+    const onTemplateUpdate = (data) => {
+      fetchTemplatesList();
+      if (data?.status === "approved") toast.success(`Template "${data.name}" is now approved.`);
+      if (data?.status === "rejected") toast.error(`Template "${data.name}" was rejected by WhatsApp.`);
+    };
+    socket.on("template_update", onTemplateUpdate);
+    return () => socket.off("template_update", onTemplateUpdate);
+  }, [socket, toast]);
 
   // Detect the header image's aspect ratio so the preview matches it.
   useEffect(() => {
@@ -498,6 +512,7 @@ export default function Templates() {
                         <td className="whitespace-nowrap">
                           <StatusBadge kind="template" status={t.status} />
                           {t.status === "approved" && sid && <p className="mt-1 font-mono text-2xs text-gray-500" title={sid}>{sid.slice(0, 12)}…</p>}
+                          {isPendingLike(t.status) && <p className="mt-1 text-2xs text-gray-500">Checked automatically every 10 min</p>}
                         </td>
                         <td>
                           <div className="flex items-center justify-end gap-1">

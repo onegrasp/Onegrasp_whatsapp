@@ -44,6 +44,19 @@ const templateRepository = {
     return data;
   },
 
+  // Submitted templates still waiting for WhatsApp's decision.
+  async findAwaitingApproval() {
+    const { data, error } = await supabase
+      .from("templates")
+      .select("*")
+      .in("status", ["pending", "received"])
+      .neq("content_sid", "")
+      .not("content_sid", "is", null)
+      .is("deleted_at", null);
+    if (error) throw error;
+    return data || [];
+  },
+
   async create(templateData) {
     const { data, error } = await supabase
       .from("templates")
