@@ -279,7 +279,9 @@ and cooldown checks).
   resumed and cancelled from the UI.
 - **Error categories** in `integrations/twilio/errors.js` drive all of this — e.g. 63049 (Meta held
   back a marketing message) is never retried quickly, and 63018 (rate limit) backs off.
-- Limits, cooldowns and quiet hours are set in the app's Settings.
+- Limits, cooldowns and quiet hours are set in the app's Settings. An urgent campaign can skip quiet
+  hours with **Send now anyway** in the send confirmation (`ignoreQuietHours`; stored on
+  `campaigns.ignore_quiet_hours` by `migrations/006_quiet_hours_override.sql`).
 
 ---
 

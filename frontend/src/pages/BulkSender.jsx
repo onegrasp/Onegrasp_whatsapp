@@ -61,7 +61,7 @@ function NobodyToSend({ pre }) {
 }
 
 // Rows for the pre-send summary.
-function PreflightSummary({ pre, count, type, templateLabel, campaignName, hasImage, splitChoice }) {
+function PreflightSummary({ pre, count, type, templateLabel, campaignName, hasImage, splitChoice, quietDelay }) {
   const skipped = [
     [pre.optedOut, "opted out (never messaged)"],
     [pre.recentlyContacted, `messaged by a campaign in the last ${pre.cooldownDays} day${pre.cooldownDays === 1 ? "" : "s"}`],
@@ -90,6 +90,13 @@ function PreflightSummary({ pre, count, type, templateLabel, campaignName, hasIm
           </div>
         ))}
       </dl>
+
+      {quietDelay && (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-13 text-amber-900">
+          It's quiet hours ({pre.quietHours?.start}–{pre.quietHours?.end}), so this campaign is scheduled for {formatDateTime(pre.startsAt)}.
+          Night-time messages get more blocks and reports. If it's urgent, choose <strong className="font-semibold">Send now anyway</strong>.
+        </p>
+      )}
 
       {skipped.length > 0 && (
         <div className="rounded-md bg-gray-50 px-3 py-2 text-13">
@@ -460,10 +467,14 @@ export default function BulkSender() {
     }
 
     const splitChoice = { split: true };
-    const startsLater = isScheduled || pre.delayedByQuietHours;
-    const ok = await confirm({
-      title: startsLater ? "Schedule this campaign?" : "Send this campaign now?",
-      confirmLabel: startsLater ? `Schedule for ${formatNumber(pre.willSend)}` : `Send to ${formatNumber(pre.willSend)}`,
+    // During quiet hours (and not deliberately scheduled), offer an override
+    // for urgent campaigns next to the default "schedule for the morning".
+    const quietDelay = pre.delayedByQuietHours && !isScheduled;
+    const choice = await confirm({
+      title: isScheduled || pre.delayedByQuietHours ? "Schedule this campaign?" : "Send this campaign now?",
+      confirmLabel:
+        isScheduled || pre.delayedByQuietHours ? `Schedule for ${formatNumber(pre.willSend)}` : `Send to ${formatNumber(pre.willSend)}`,
+      secondaryLabel: quietDelay ? "Send now anyway" : undefined,
       message: (
         <PreflightSummary
           pre={pre}
@@ -473,14 +484,17 @@ export default function BulkSender() {
           campaignName={payload.campaignName}
           hasImage={Boolean(campaignMediaUrl)}
           splitChoice={splitChoice}
+          quietDelay={quietDelay}
         />
       ),
     });
-    if (!ok) return;
+    if (!choice) return;
+    const sendNowAnyway = choice === "secondary";
+    const startsLater = isScheduled || (pre.delayedByQuietHours && !sendNowAnyway);
 
     setSending(true);
     try {
-      const res = await sendBulkMessages({ ...payload, splitAcrossDays: splitChoice.split });
+      const res = await sendBulkMessages({ ...payload, splitAcrossDays: splitChoice.split, ignoreQuietHours: sendNowAnyway });
       const data = res.data || {};
       activeCampaignRef.current = data.campaignId || null;
       const queued = data.queued ?? pre.willSend;

@@ -9,7 +9,7 @@ const analyticsWorker = require("./analyticsWorker");
 const retryWorker = require("./retryWorker");
 const statusSyncWorker = require("./statusSyncWorker");
 const { refreshCampaignProgress } = require("../services/campaignProgress");
-const { getSafeguards, quietHoursOptions } = require("../services/sendingPolicy");
+const { getSafeguards, quietHoursOptions, hasQuietHoursOverride } = require("../services/sendingPolicy");
 const { quietHoursEnd } = require("../utils/quietHours");
 const logger = require("../utils/logger");
 
@@ -52,6 +52,9 @@ const admitCampaignJob = async (job) => {
     await jobRepository.update(job.id, { status: campaign.status });
     return false;
   }
+
+  // An admin explicitly chose to send this campaign during quiet hours.
+  if (hasQuietHoursOverride(campaign)) return true;
 
   const safeguards = await getSafeguards();
   const resumeAt = quietHoursEnd(new Date(), quietHoursOptions(safeguards));

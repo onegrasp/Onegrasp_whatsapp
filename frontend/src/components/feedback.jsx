@@ -36,7 +36,9 @@ export function FeedbackProvider({ children }) {
     [push]
   );
 
-  // confirm({ title, message, confirmLabel, tone }) -> Promise<boolean>
+  // confirm({ title, message, confirmLabel, tone, secondaryLabel }) ->
+  // Promise<true | false | "secondary">. secondaryLabel adds a second,
+  // less prominent action (e.g. "Send now anyway").
   const confirm = useCallback(
     (options) => new Promise((resolve) => setConfirmState({ ...options, resolve })),
     []
@@ -74,13 +76,18 @@ export function FeedbackProvider({ children }) {
         open={Boolean(confirmState)}
         onClose={() => closeConfirm(false)}
         title={confirmState?.title || "Are you sure?"}
-        size="sm"
+        size={confirmState?.secondaryLabel ? "md" : "sm"}
         initialFocus={false}
         footer={
           <>
             <button type="button" className="btn btn-secondary" onClick={() => closeConfirm(false)}>
               Cancel
             </button>
+            {confirmState?.secondaryLabel && (
+              <button type="button" className="btn btn-secondary" onClick={() => closeConfirm("secondary")}>
+                {confirmState.secondaryLabel}
+              </button>
+            )}
             <button
               type="button"
               autoFocus

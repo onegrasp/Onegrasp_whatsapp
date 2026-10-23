@@ -8,6 +8,7 @@ const {
   assignRunTimes,
   adjustForQuietHours,
   getSafeguards,
+  markQuietHoursOverride,
 } = require("../services/sendingPolicy");
 
 const MAX_BULK_RECIPIENTS = 20000;
@@ -117,6 +118,8 @@ const sendBulk = async (req, res) => {
     skipRecentDays,
     requireConsent = false,
     splitAcrossDays = false,
+    // Admin chose "Send now anyway" during quiet hours.
+    ignoreQuietHours = false,
   } = req.body || {};
 
   if (!Array.isArray(phones) || phones.length === 0) {
@@ -173,7 +176,7 @@ const sendBulk = async (req, res) => {
     }
 
     const requestedStart = requestedStartFrom(scheduledAt);
-    const start = adjustForQuietHours(requestedStart, safeguards);
+    const start = ignoreQuietHours ? requestedStart : adjustForQuietHours(requestedStart, safeguards);
 
     const limit = type === "template" ? safeguards.dailyConversationLimit : 0;
     const usage = limit > 0 ? await getDailyUsage(limit) : null;
@@ -185,20 +188,27 @@ const sendBulk = async (req, res) => {
     });
 
     const startsLater = start.getTime() > Date.now() + 5000;
-    const { data: campaign, error: campError } = await supabase
-      .from("campaigns")
-      .insert([
-        {
-          name: campaignName || `Campaign ${new Date().toLocaleDateString()}`,
-          message: sanitizedMessage || "",
-          template_name: templateName || "",
-          type,
-          total_contacts: totalContacts,
-          status: startsLater ? "scheduled" : "running",
-        },
-      ])
-      .select()
-      .single();
+    const campaignRow = {
+      name: campaignName || `Campaign ${new Date().toLocaleDateString()}`,
+      message: sanitizedMessage || "",
+      template_name: templateName || "",
+      type,
+      total_contacts: totalContacts,
+      status: startsLater ? "scheduled" : "running",
+      ...(ignoreQuietHours ? { ignore_quiet_hours: true } : {}),
+    };
+    const insertCampaign = (row) => supabase.from("campaigns").insert([row]).select().single();
+
+    let { data: campaign, error: campError } = await insertCampaign(campaignRow);
+    if (campError && ignoreQuietHours && /ignore_quiet_hours/.test(campError.message || "")) {
+      // Migration 006 not run yet: the in-memory override below still applies.
+      const { ignore_quiet_hours, ...rowWithoutFlag } = campaignRow;
+      ({ data: campaign, error: campError } = await insertCampaign(rowWithoutFlag));
+    }
+    if (!campError && campaign && ignoreQuietHours) {
+      markQuietHoursOverride(campaign.id);
+      logger.warn(`Campaign ${campaign.id} sent during quiet hours by admin override.`);
+    }
 
     if (campError) {
       logger.error("Failed to create campaign in Supabase:", { error: campError });

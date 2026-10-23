@@ -99,6 +99,14 @@ const quietHoursOptions = (safeguards) => ({
 // When a campaign starting at `date` would actually begin, given quiet hours.
 const adjustForQuietHours = (date, safeguards) => quietHoursEnd(date, quietHoursOptions(safeguards)) || date;
 
+// Campaigns an admin chose to send during quiet hours ("Send now anyway").
+// Stored on the campaign (migration 006) and kept here too, so the override
+// works even before that migration has run.
+const quietHoursOverrides = new Set();
+const markQuietHoursOverride = (campaignId) => quietHoursOverrides.add(campaignId);
+const hasQuietHoursOverride = (campaign) =>
+  Boolean(campaign && (campaign.ignore_quiet_hours === true || quietHoursOverrides.has(campaign.id)));
+
 const getSafeguards = () => settingsService.getSafeguards();
 
 module.exports = {
@@ -108,4 +116,6 @@ module.exports = {
   adjustForQuietHours,
   quietHoursOptions,
   getSafeguards,
+  markQuietHoursOverride,
+  hasQuietHoursOverride,
 };

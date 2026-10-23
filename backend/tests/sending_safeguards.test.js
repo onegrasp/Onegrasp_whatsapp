@@ -5,7 +5,7 @@ const { detectConsentKeyword } = require("../src/utils/keywords");
 const { quietHoursEnd } = require("../src/utils/quietHours");
 const { mapTwilioError } = require("../src/integrations/twilio/errors");
 const { mapMetaError } = require("../src/integrations/meta/errors");
-const { assignRunTimes } = require("../src/services/sendingPolicy");
+const { assignRunTimes, markQuietHoursOverride, hasQuietHoursOverride } = require("../src/services/sendingPolicy");
 const { PERSISTENT_CATEGORIES } = require("../src/workers/retryWorker");
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -66,6 +66,15 @@ test("marketing holds and account problems are never retried quickly", () => {
     assert.ok(PERSISTENT_CATEGORIES.has(category), category);
   }
   assert.ok(!PERSISTENT_CATEGORIES.has("rate_limit"), "rate limits should back off and retry");
+});
+
+test("'Send now anyway' exempts only that campaign from quiet hours", () => {
+  assert.strictEqual(hasQuietHoursOverride({ id: "c-normal" }), false);
+  assert.strictEqual(hasQuietHoursOverride({ id: "c-db", ignore_quiet_hours: true }), true);
+  markQuietHoursOverride("c-urgent");
+  assert.strictEqual(hasQuietHoursOverride({ id: "c-urgent" }), true);
+  assert.strictEqual(hasQuietHoursOverride({ id: "c-normal" }), false);
+  assert.strictEqual(hasQuietHoursOverride(null), false);
 });
 
 test("daily-limit splitting sends what fits today and the rest in daily batches", () => {
