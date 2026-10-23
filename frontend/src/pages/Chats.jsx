@@ -280,7 +280,7 @@ export default function Chats() {
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="relative min-h-0 flex-1 overflow-y-auto">
           {loadingConvs ? (
             <div className="flex items-center gap-2 px-4 py-6 text-sm text-gray-500">
               <Spinner /> Loading chats…
@@ -362,7 +362,7 @@ export default function Chats() {
             </button>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto bg-gray-50 px-4 py-4 sm:px-6">
+          <div className="relative min-h-0 flex-1 overflow-y-auto bg-gray-50 px-4 py-4 sm:px-6">
             {loadingMsgs ? (
               <div className="flex h-full items-center justify-center gap-2 text-sm text-gray-500">
                 <Spinner /> Loading messages…

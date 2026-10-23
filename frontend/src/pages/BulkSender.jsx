@@ -501,7 +501,7 @@ export default function BulkSender() {
     <div className="flex h-full flex-col overflow-hidden">
       <PageHeader title="Bulk send" description="Choose recipients, compose the message, and send or schedule." />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
         {/* Recipients */}
         <section aria-label="Recipients" className="flex flex-col border-b border-gray-200 lg:min-h-0 lg:flex-1 lg:border-b-0 lg:border-r">
           <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-4 py-3 sm:px-6 lg:px-8">
@@ -533,7 +533,7 @@ export default function BulkSender() {
             </div>
           )}
 
-          <div className="max-h-[55vh] min-h-[240px] flex-1 overflow-y-auto lg:max-h-none">
+          <div className="relative max-h-[55vh] min-h-[240px] flex-1 overflow-y-auto lg:max-h-none">
             <table className="table">
               <thead className="sticky top-0 z-10">
                 <tr>
@@ -634,7 +634,7 @@ export default function BulkSender() {
         </section>
 
         {/* Compose */}
-        <aside aria-label="Compose campaign" className="flex shrink-0 flex-col bg-white lg:w-[420px] lg:overflow-y-auto">
+        <aside aria-label="Compose campaign" className="relative flex shrink-0 flex-col bg-white lg:w-[420px] lg:overflow-y-auto">
           <div className="flex-1 space-y-5 px-4 py-5 sm:px-6">
             <Field label="Campaign name" hint="Shown in Campaigns. Defaults to today's date.">
               {(id) => <input id={id} className="input" value={campaignName} onChange={(e) => setCampaignName(e.target.value)} placeholder="e.g. July promotion" />}

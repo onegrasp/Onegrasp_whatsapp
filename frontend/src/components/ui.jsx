@@ -17,12 +17,14 @@ export function PageHeader({ title, description, actions, children }) {
   );
 }
 
-// Standard scrolling page: header plus padded content area.
+// Standard scrolling page: header plus padded content area. Scroll areas are
+// `relative` so absolutely positioned content (sr-only labels) is clipped by
+// the scroll area rather than extending the whole page.
 export function Page({ header, children, className = "" }) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {header}
-      <div className={`min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 ${className}`}>{children}</div>
+      <div className={`relative min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8 ${className}`}>{children}</div>
     </div>
   );
 }

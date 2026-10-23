@@ -105,7 +105,7 @@ function NavContent({ unread, onNavigate, onLogout }) {
         </div>
       </div>
 
-      <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4" aria-label="Main">
+      <nav className="relative flex-1 space-y-5 overflow-y-auto px-3 py-4" aria-label="Main">
         {NAV_GROUPS.map((group, i) => (
           <div key={group.label || i}>
             {group.label && <p className="mb-1 px-2 text-xs font-medium text-gray-400">{group.label}</p>}
@@ -177,8 +177,11 @@ export default function AppShell({ onLogout, children }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [drawerOpen]);
 
+  // `relative` matters: absolutely positioned descendants (e.g. sr-only
+  // labels) that have no closer positioned ancestor are anchored and clipped
+  // here, instead of stretching the page and making it scroll into blank space.
   return (
-    <div className="flex h-dvh overflow-hidden bg-white">
+    <div className="relative flex h-dvh overflow-hidden bg-white">
       <aside className="hidden w-60 shrink-0 border-r border-gray-200 bg-gray-50 lg:block">
         <NavContent unread={unread} onLogout={onLogout} />
       </aside>
