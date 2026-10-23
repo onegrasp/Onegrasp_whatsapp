@@ -9,8 +9,12 @@ const { resolveTemplateText, resolveTemplateSendTarget, sanitizeVariableValue } 
 const process = async (job) => {
   const contact = await contactRepository.findByPhone(job.phone);
 
-  // 1. Exclude opted-out / inactive contacts before execution
-  if (contact && contact.is_active === false) {
+  // 1. Exclude opted-out / inactive contacts before execution. Campaign
+  //    messages also check the opt-out list, which covers numbers that aren't
+  //    saved as contacts.
+  const optedOut = (contact && contact.is_active === false) ||
+    (job.campaign_id ? await contactRepository.isOptedOut(job.phone) : false);
+  if (optedOut) {
     logger.warn(`Campaign send skipped for ${job.phone}: Contact has opted out or is inactive.`);
     const optOutErr = new Error("Contact has opted out or is inactive.");
     optOutErr.category = "opt_out";
@@ -146,54 +150,10 @@ const process = async (job) => {
     return { messageSid, savedMsg };
   } catch (err) {
     logger.error(`Campaign job send failed for phone ${job.phone}:`, { error: err.message, category: err.category });
-    const failTime = new Date().toISOString();
-    const failText = personalizedMessage || `[Template: ${job.template_name}]`;
-
-    try {
-      const savedMsg = await messageRepository.create({
-        phone: job.phone,
-        contact_name: contactName,
-        text: failText,
-        type: job.type === "template" ? "template" : "text",
-        direction: "outgoing",
-        status: "failed",
-        error_details: err.message || "Sending failed",
-        error_category: err.category || "api_error",
-        template_name: job.template_name || "",
-        campaign_id: job.campaign_id,
-        media_url: job.media_url || "",
-        timestamp: failTime,
-      });
-
-      try {
-        await conversationRepository.upsert({
-          phone: job.phone,
-          contact_name: contactName,
-          last_message: failText,
-          last_direction: "outgoing",
-          last_status: "failed",
-          last_timestamp: failTime,
-        });
-      } catch (convErr) {}
-
-      const io = getIo();
-      if (io) {
-        io.emit("new_message", {
-          _id: savedMsg.id,
-          phone: savedMsg.phone,
-          contactName: savedMsg.contact_name,
-          text: savedMsg.text,
-          type: savedMsg.type,
-          direction: savedMsg.direction,
-          status: "failed",
-          errorDetails: savedMsg.error_details,
-          timestamp: savedMsg.timestamp,
-        });
-      }
-    } catch (dbErr) {
-      logger.error("Failed to record failed message in DB:", { error: dbErr });
-    }
-
+    // The retry worker decides whether this is final and records the failure
+    // once. Pass along what the message would have said.
+    err.displayText = personalizedMessage || templateDisplayText || `[Template: ${job.template_name}]`;
+    err.contactName = contactName;
     throw err;
   }
 };

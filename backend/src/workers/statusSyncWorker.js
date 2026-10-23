@@ -51,8 +51,11 @@ const syncBatch = async () => {
         let errorDetails = null;
         let errorCategory = null;
         if (remote.errorCode) {
-          errorDetails = `Twilio Error ${remote.errorCode}: ${remote.errorMessage || ""}`.trim();
-          errorCategory = mapTwilioError({ code: remote.errorCode, message: remote.errorMessage }).category;
+          const mapped = mapTwilioError({ code: remote.errorCode, message: remote.errorMessage });
+          errorCategory = mapped.category;
+          errorDetails = mapped.category !== "other"
+            ? mapped.message
+            : `Twilio Error ${remote.errorCode}: ${remote.errorMessage || "Message not delivered"}`.trim();
         }
         eventBus.publish("MessageStatusEvent", {
           phone: row.phone,

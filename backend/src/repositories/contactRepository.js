@@ -1,4 +1,5 @@
 const supabase = require("../config/supabase");
+const logger = require("../utils/logger");
 
 // Strip characters that are significant in PostgREST filter grammar so raw user
 // input (search terms, set names) cannot inject extra filter conditions into an
@@ -6,7 +7,48 @@ const supabase = require("../config/supabase");
 const sanitizeFilterValue = (value) =>
   String(value == null ? "" : value).replace(/[,()*:"\\{}]/g, " ").trim();
 
+// Columns added by migrations/005_sending_safeguards.sql. Until it runs,
+// writes that include them fail, so they are dropped and the write retried —
+// the core change (opt-out, new contact) must never be lost.
+const OPTIONAL_COLUMNS = ["consent_status", "consent_source", "consent_at", "invalid_reason", "invalid_at"];
+let optionalColumnsMissing = false;
+
+const isMissingColumnError = (error) =>
+  Boolean(error) &&
+  (error.code === "PGRST204" || error.code === "42703" || /column|schema cache/i.test(error.message || "")) &&
+  OPTIONAL_COLUMNS.some((c) => (error.message || "").includes(c));
+
+const stripOptional = (payload) => {
+  if (Array.isArray(payload)) return payload.map(stripOptional);
+  const copy = { ...payload };
+  OPTIONAL_COLUMNS.forEach((c) => delete copy[c]);
+  return copy;
+};
+
+const hasOptional = (payload) =>
+  (Array.isArray(payload) ? payload : [payload]).some((p) => OPTIONAL_COLUMNS.some((c) => c in p));
+
+// Runs `write(payload)` (a Supabase query builder), retrying without the
+// optional columns if the database doesn't have them yet.
+async function writeContacts(write, payload) {
+  const first = optionalColumnsMissing ? stripOptional(payload) : payload;
+  let { data, error } = await write(first);
+  if (error && hasOptional(first) && isMissingColumnError(error)) {
+    optionalColumnsMissing = true;
+    logger.warn("Contact consent columns are missing — run backend/migrations/005_sending_safeguards.sql.");
+    ({ data, error } = await write(stripOptional(first)));
+  }
+  if (error) throw error;
+  return data;
+}
+
+const phoneVariants = (phone) => {
+  const clean = String(phone || "").replace(/^\+/, "");
+  return Array.from(new Set([phone, clean, `+${clean}`]));
+};
+
 const contactRepository = {
+  optionalColumnsMissing: () => optionalColumnsMissing,
   async upsert(phone, name, label = "none") {
     const cleanLabel = label && label !== "all" ? label.trim().toLowerCase().replace(/\s+/g, "_") : "none";
     
@@ -277,25 +319,105 @@ const contactRepository = {
   },
 
   async deactivateByPhone(phone) {
-    const clean = phone.replace(/^\+/, "");
-    const variants = Array.from(new Set([phone, clean, `+${clean}`]));
-    const { data, error } = await supabase
-      .from("contacts")
-      .update({ is_active: false })
-      .in("phone", variants);
+    return this.setOptOut(phone, { reason: "provider_opt_out", source: "provider_error" });
+  },
 
-    try {
-      await supabase.from("opt_outs").upsert({ phone, reason: "user_opt_out" }, { onConflict: "phone" });
-    } catch (e) {
-      // Ignore opt_outs table insert errors if table doesn't exist yet
+  // Records an opt-out: the number goes on the opt_outs list (enforced for
+  // every send) and the contact is deactivated with the reason kept.
+  async setOptOut(phone, { reason = "user_opt_out", source = "" } = {}) {
+    const { error: optError } = await supabase
+      .from("opt_outs")
+      .upsert({ phone, reason, opted_out_at: new Date().toISOString() }, { onConflict: "phone" });
+    if (optError) logger.warn("Could not write opt_outs row", { phone, error: optError.message });
+
+    return writeContacts(
+      (payload) => supabase.from("contacts").update(payload).in("phone", phoneVariants(phone)).select("id"),
+      {
+        is_active: false,
+        consent_status: "opted_out",
+        consent_source: source || reason,
+        consent_at: new Date().toISOString(),
+      }
+    );
+  },
+
+  // Reverses an opt-out after the person asks to subscribe again.
+  async clearOptOut(phone, { source = "" } = {}) {
+    const { error: optError } = await supabase.from("opt_outs").delete().in("phone", phoneVariants(phone));
+    if (optError) logger.warn("Could not remove opt_outs row", { phone, error: optError.message });
+
+    return writeContacts(
+      (payload) => supabase.from("contacts").update(payload).in("phone", phoneVariants(phone)).select("id"),
+      { is_active: true, consent_status: "opted_in", consent_source: source, consent_at: new Date().toISOString() }
+    );
+  },
+
+  // Records consent for several contacts. Opting someone out also adds them
+  // to the opt_outs list; opting in removes them from it.
+  async updateConsent(ids, status, source = "") {
+    if (!ids || ids.length === 0) return [];
+    const { data: rows, error } = await supabase.from("contacts").select("id, phone").in("id", ids);
+    if (error) throw error;
+
+    for (const row of rows || []) {
+      if (status === "opted_out") await this.setOptOut(row.phone, { reason: "admin", source });
+      else await this.clearOptOut(row.phone, { source });
     }
-    return data;
+    return rows || [];
+  },
+
+  // WhatsApp said this number can't receive messages. Kept on the contact so
+  // campaigns can leave it out; cleared when a message reaches it again.
+  async markInvalid(phone, reason) {
+    return writeContacts(
+      (payload) => supabase.from("contacts").update(payload).in("phone", phoneVariants(phone)).select("id"),
+      { invalid_reason: String(reason || "Not reachable on WhatsApp").slice(0, 300), invalid_at: new Date().toISOString() }
+    ).catch((e) => logger.warn("Could not flag invalid number", { phone, error: e.message }));
+  },
+
+  async clearInvalid(phone) {
+    if (optionalColumnsMissing) return;
+    const { error } = await supabase
+      .from("contacts")
+      .update({ invalid_reason: "", invalid_at: null })
+      .in("phone", phoneVariants(phone))
+      .not("invalid_at", "is", null);
+    if (error && isMissingColumnError(error)) optionalColumnsMissing = true;
+  },
+
+  // Full contact rows for many phones (chunked to stay under URL and row limits).
+  async findDetailedByPhones(phones) {
+    const unique = Array.from(new Set(phones || []));
+    const rows = [];
+    for (let i = 0; i < unique.length; i += 300) {
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("*")
+        .in("phone", unique.slice(i, i + 300))
+        .is("deleted_at", null);
+      if (error) throw error;
+      rows.push(...(data || []));
+    }
+    return rows;
+  },
+
+  async findOptedOutPhones(phones) {
+    const unique = Array.from(new Set((phones || []).flatMap(phoneVariants)));
+    const result = new Set();
+    for (let i = 0; i < unique.length; i += 300) {
+      const { data, error } = await supabase.from("opt_outs").select("phone").in("phone", unique.slice(i, i + 300));
+      if (error) {
+        logger.warn("Could not read opt_outs", { error: error.message });
+        break;
+      }
+      (data || []).forEach((r) => result.add(`+${String(r.phone).replace(/^\+/, "")}`));
+    }
+    return result;
   },
 
   async isOptedOut(phone) {
     try {
-      const clean = phone.replace(/^\+/, "");
-      const variants = Array.from(new Set([phone, clean, `+${clean}`]));
+      const variants = phoneVariants(phone);
       const { data } = await supabase
         .from("opt_outs")
         .select("id")
@@ -354,16 +476,33 @@ const contactRepository = {
   // that were soft-deleted earlier. Returns the phones that could not be saved.
   async insertMany(contacts) {
     const failed = [];
+    const upsert = (payload) => supabase.from("contacts").upsert(payload, { onConflict: "phone" });
     for (let i = 0; i < contacts.length; i += 500) {
       const chunk = contacts.slice(i, i + 500);
-      const { error } = await supabase.from("contacts").upsert(chunk, { onConflict: "phone" });
-      if (!error) continue;
+      try {
+        await writeContacts(upsert, chunk);
+        continue;
+      } catch (chunkError) {
+        // Isolate the rows that fail.
+      }
       for (const row of chunk) {
-        const { error: rowError } = await supabase.from("contacts").upsert(row, { onConflict: "phone" });
-        if (rowError) failed.push({ phone: row.phone, message: rowError.message });
+        try {
+          await writeContacts(upsert, row);
+        } catch (rowError) {
+          failed.push({ phone: row.phone, message: rowError.message });
+        }
       }
     }
     return failed;
+  },
+
+  // Records consent for existing contacts found in an upload.
+  async recordConsentByIds(ids, source) {
+    if (!ids || ids.length === 0) return;
+    await writeContacts(
+      (payload) => supabase.from("contacts").update(payload).in("id", ids).neq("consent_status", "opted_out"),
+      { consent_status: "opted_in", consent_source: source, consent_at: new Date().toISOString() }
+    ).catch((e) => logger.warn("Could not record consent for existing contacts", { error: e.message }));
   },
 
   async updateName(id, name) {

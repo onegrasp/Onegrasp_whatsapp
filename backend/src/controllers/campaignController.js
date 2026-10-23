@@ -1,16 +1,5 @@
 const campaignService = require("../services/campaignService");
-const { validateSendBulk } = require("../validators/campaign.validator");
-
-const sendBulk = async (req, res, next) => {
-  try {
-    const validated = validateSendBulk(req.body);
-    const io = req.app.get("io");
-    const result = await campaignService.sendBulk(validated, io);
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
-};
+const { campaignControl } = require("../services/campaignControl");
 
 const getCampaigns = async (req, res, next) => {
   try {
@@ -30,8 +19,37 @@ const getCampaignMessages = async (req, res, next) => {
   }
 };
 
+const pauseCampaign = async (req, res, next) => {
+  try {
+    await campaignControl.pause(req.params.id, "Paused by admin");
+    res.json({ success: true, status: "paused" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const resumeCampaign = async (req, res, next) => {
+  try {
+    await campaignControl.resume(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const cancelCampaign = async (req, res, next) => {
+  try {
+    const result = await campaignControl.cancel(req.params.id);
+    res.json({ success: true, status: "cancelled", ...result });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
-  sendBulk,
   getCampaigns,
   getCampaignMessages,
+  pauseCampaign,
+  resumeCampaign,
+  cancelCampaign,
 };

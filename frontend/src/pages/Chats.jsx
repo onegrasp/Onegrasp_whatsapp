@@ -349,6 +349,7 @@ export default function Chats() {
               <p className="truncate text-sm font-semibold text-gray-900">{selectedConv?.name || selectedPhone}</p>
               <p className="text-xs tabular-nums text-gray-500">{selectedPhone}</p>
             </div>
+            {selectedConv?.isOptedOut && <Badge tone="danger">Opted out</Badge>}
             {selectedConv?.label && selectedConv.label !== "none" && <Badge>{formatSetName(selectedConv.label)}</Badge>}
             <button
               type="button"
@@ -390,6 +391,11 @@ export default function Chats() {
           </div>
 
           <div className="shrink-0 border-t border-gray-200 bg-white px-4 py-3">
+            {selectedConv?.isOptedOut && (
+              <p className="mb-2 rounded-md bg-red-50 px-3 py-1.5 text-xs text-red-800">
+                This contact opted out. Only reply to their questions; don't send marketing. They can opt back in by replying START.
+              </p>
+            )}
             {attachmentFile && (
               <div className="mb-2 flex max-w-sm items-center gap-2 rounded-md border border-gray-200 px-2.5 py-1.5 text-13">
                 <Paperclip size={13} className="text-gray-400" aria-hidden="true" />

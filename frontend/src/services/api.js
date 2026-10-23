@@ -95,6 +95,9 @@ export const updateContactLabel = (id, label) =>
 export const deleteContact = (id) => api.delete(`/contacts/${id}`);
 export const toggleImportantContact = (phone, isImportant) =>
   api.patch(`/contacts/important/${phone}`, { isImportant });
+// status: "opted_in" (with where consent came from) or "opted_out"
+export const updateContactConsent = (contactIds, status, source) =>
+  api.post("/contacts/consent", { contactIds, status, source });
 
 // Messaging
 export const sendBulkMessages = (data) => api.post("/send-bulk", data);
@@ -119,6 +122,11 @@ export const uploadMediaFile = (formData) =>
 // Campaigns
 export const getCampaigns = () => api.get("/campaigns");
 export const getCampaignMessages = (id) => api.get(`/campaigns/${id}/messages`);
+// What a campaign would do before sending: skipped contacts, daily limit, start time.
+export const campaignPreflight = (data) => api.post("/campaigns/preflight", data);
+export const pauseCampaign = (id) => api.post(`/campaigns/${id}/pause`);
+export const resumeCampaign = (id) => api.post(`/campaigns/${id}/resume`);
+export const cancelCampaign = (id) => api.post(`/campaigns/${id}/cancel`);
 
 // Conversations & Messages
 export const getConversations = (params = {}) =>

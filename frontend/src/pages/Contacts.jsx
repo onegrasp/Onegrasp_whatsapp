@@ -8,20 +8,88 @@ import {
   deleteContact,
   addSingleContact,
   deleteBulkContacts,
+  updateContactConsent,
 } from "../services/api";
-import { Dialog, EmptyState, ErrorState, Field, LoadingRows, Page, PageHeader } from "../components/ui";
+import { Badge, Dialog, EmptyState, ErrorState, Field, LoadingRows, Page, PageHeader } from "../components/ui";
 import { useConfirm, useToast } from "../components/feedback";
 import ImportContactsDialog from "../components/ImportContactsDialog";
+import ConsentFields from "../components/ConsentFields";
 import { BUILT_IN_SETS, STATUS_LABELS, customSetsFrom, downloadSampleCsv, formatSetName } from "../lib/contacts";
 import { errorMessage, formatDate, formatNumber } from "../lib/format";
 
 const PAGE_SIZE = 50;
+
+function ConsentBadges({ contact }) {
+  const status = contact.consentStatus || (contact.isActive === false ? "opted_out" : "unknown");
+  const detail = [contact.consentSource, contact.consentAt && formatDate(contact.consentAt)].filter(Boolean).join(" · ");
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {status === "opted_in" && <Badge tone="success">Opted in</Badge>}
+      {status === "opted_out" && <Badge tone="danger">Opted out</Badge>}
+      {status === "unknown" && <Badge>Not recorded</Badge>}
+      {contact.invalidReason && <Badge tone="warning">Not on WhatsApp</Badge>}
+      {(detail || contact.invalidReason) && (
+        <span className="sr-only">{[detail, contact.invalidReason].filter(Boolean).join(". ")}</span>
+      )}
+      {detail && (
+        <span className="w-full truncate text-xs text-gray-500" title={detail}>
+          {detail}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function RecordConsentDialog({ open, onClose, count, onSave }) {
+  const [source, setSource] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) setSource("");
+  }, [open]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!source.trim()) return;
+    setSaving(true);
+    await onSave(source.trim());
+    setSaving(false);
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={`Record consent for ${count} contact${count === 1 ? "" : "s"}`}
+      description="Only do this if these people agreed to receive WhatsApp messages from you."
+      size="sm"
+      footer={
+        <>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" form="consent-form" className="btn btn-primary" disabled={saving || !source.trim()}>
+            Record consent
+          </button>
+        </>
+      }
+    >
+      <form id="consent-form" onSubmit={handleSubmit}>
+        <Field label="Where did they give consent?" hint="Kept with each contact as proof, e.g. Website sign-up form.">
+          {(id) => <input id={id} className="input" value={source} onChange={(e) => setSource(e.target.value)} placeholder="e.g. Webinar registration form" />}
+        </Field>
+      </form>
+    </Dialog>
+  );
+}
 
 function AddContactDialog({ open, onClose, sets, defaultSet, onSaved }) {
   const [name, setName] = useState("");
   const [countryCode, setCountryCode] = useState("91");
   const [phone, setPhone] = useState("");
   const [targetSet, setTargetSet] = useState(defaultSet);
+  const [consent, setConsent] = useState(false);
+  const [consentSource, setConsentSource] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -30,6 +98,8 @@ function AddContactDialog({ open, onClose, sets, defaultSet, onSaved }) {
       setName("");
       setPhone("");
       setError("");
+      setConsent(false);
+      setConsentSource("");
       setTargetSet(defaultSet);
     }
   }, [open, defaultSet]);
@@ -40,7 +110,7 @@ function AddContactDialog({ open, onClose, sets, defaultSet, onSaved }) {
     setSaving(true);
     setError("");
     try {
-      await addSingleContact({ name, phone, countryCode, set: targetSet });
+      await addSingleContact({ name, phone, countryCode, set: targetSet, consent, consentSource });
       onSaved();
     } catch (err) {
       setError(errorMessage(err, "The contact could not be saved."));
@@ -59,7 +129,7 @@ function AddContactDialog({ open, onClose, sets, defaultSet, onSaved }) {
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" form="add-contact-form" className="btn btn-primary" disabled={saving || !phone.trim()}>
+          <button type="submit" form="add-contact-form" className="btn btn-primary" disabled={saving || !phone.trim() || (consent && !consentSource.trim())}>
             {saving ? "Saving…" : "Save contact"}
           </button>
         </>
@@ -108,6 +178,7 @@ function AddContactDialog({ open, onClose, sets, defaultSet, onSaved }) {
             </select>
           )}
         </Field>
+        <ConsentFields consent={consent} setConsent={setConsent} source={consentSource} setSource={setConsentSource} />
         {error && <ErrorState message={error} />}
       </form>
     </Dialog>
@@ -179,7 +250,7 @@ export default function Contacts() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [dialog, setDialog] = useState(null); // "add" | "set" | "import"
+  const [dialog, setDialog] = useState(null); // "add" | "set" | "import" | "consent"
 
   const loadSets = useCallback(async () => {
     try {
@@ -259,6 +330,40 @@ export default function Contacts() {
       refreshAll();
     } catch (err) {
       toast.error(`Could not delete contacts: ${errorMessage(err)}`);
+    }
+  };
+
+  const recordConsent = async (source) => {
+    const count = selectedIds.length;
+    try {
+      const res = await updateContactConsent(selectedIds, "opted_in", source);
+      setDialog(null);
+      if (res.data?.consentNotSaved) {
+        toast.error("Consent can't be stored yet: run migration 005_sending_safeguards.sql in Supabase.");
+      } else {
+        toast.success(`Consent recorded for ${count} contact${count === 1 ? "" : "s"}`);
+      }
+      load();
+    } catch (err) {
+      toast.error(`Could not record consent: ${errorMessage(err)}`);
+    }
+  };
+
+  const markOptedOut = async () => {
+    const count = selectedIds.length;
+    const ok = await confirm({
+      title: `Mark ${count} contact${count === 1 ? "" : "s"} as opted out?`,
+      message: "They won't receive any campaigns, and queued messages to them are skipped. Only they can opt back in, by replying START.",
+      confirmLabel: "Mark opted out",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await updateContactConsent(selectedIds, "opted_out", "Marked by admin");
+      toast.success(`${count} contact${count === 1 ? "" : "s"} marked as opted out`);
+      load();
+    } catch (err) {
+      toast.error(`Could not update: ${errorMessage(err)}`);
     }
   };
 
@@ -385,6 +490,12 @@ export default function Contacts() {
                 </option>
               ))}
             </select>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDialog("consent")}>
+              Record consent
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={markOptedOut}>
+              Mark opted out
+            </button>
             <button type="button" className="btn btn-danger-ghost btn-sm" onClick={deleteSelected}>
               <Trash2 size={14} aria-hidden="true" />
               Delete
@@ -435,16 +546,17 @@ export default function Contacts() {
                 <th>Name</th>
                 <th>Phone</th>
                 <th>Set / label</th>
+                <th>WhatsApp consent</th>
                 <th>Added</th>
                 <th className="w-12" aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <LoadingRows rows={8} cols={6} />
+                <LoadingRows rows={8} cols={7} />
               ) : contacts.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="h-auto">
+                  <td colSpan={7} className="h-auto">
                     <EmptyState
                       icon={Users}
                       title={search ? "No matching contacts" : "No contacts in this set"}
@@ -497,6 +609,9 @@ export default function Contacts() {
                         </optgroup>
                       </select>
                     </td>
+                    <td className="min-w-[150px] max-w-[220px] py-2">
+                      <ConsentBadges contact={c} />
+                    </td>
                     <td className="whitespace-nowrap text-gray-500">{formatDate(c.createdAt)}</td>
                     <td className="text-right">
                       <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={() => deleteOne(c)} aria-label={`Delete ${c.name}`}>
@@ -539,6 +654,7 @@ export default function Contacts() {
         }}
       />
       <NewSetDialog open={dialog === "set"} onClose={() => setDialog(null)} selectedCount={selectedIds.length} onCreate={createSet} />
+      <RecordConsentDialog open={dialog === "consent"} onClose={() => setDialog(null)} count={selectedIds.length} onSave={recordConsent} />
       <ImportContactsDialog
         open={dialog === "import"}
         onClose={() => setDialog(null)}

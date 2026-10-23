@@ -31,14 +31,22 @@ const mapMetaError = (err) => {
     category = "template_param_mismatch";
   } else if (code === 131008 || code === 131002 || code === 21614 || (code === 100 && /recipient|phone|to/i.test(message))) {
     category = "invalid_phone";
-  } else if (code === 130429 || code === 80007 || code === 429 || subcode === 130429) {
+  } else if (code === 130429 || code === 80007 || code === 429 || subcode === 130429 || code === 131056) {
+    // 131056: too many messages to the same recipient (pair rate limit).
     category = "rate_limit";
+  } else if (code === 131049) {
+    // Meta held back a marketing message (per-user marketing limit).
+    category = "marketing_limit";
+  } else if (code === 131048 || code === 131031 || code === 368) {
+    // Spam rate limit, locked account, or policy block: stop sending.
+    category = "account_restricted";
   } else if (code === 190 || code === 102 || code === 3) {
     category = "auth_error";
   } else if (code === 131026 || code === 131009) {
     category = "message_undeliverable";
-  } else if (code === 131030 || code === 131056) {
-    category = "opt_out";
+  } else if (code === 131030) {
+    // Recipient not in the allowed list (test number setup).
+    category = "sandbox_not_joined";
   } else if (code === 131051 || code === 131052 || code === 131053) {
     category = "media_error";
   }

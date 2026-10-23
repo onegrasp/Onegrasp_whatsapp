@@ -62,28 +62,69 @@ const jobRepository = {
     return data ? data.length : 0;
   },
 
+  // Moves a campaign's jobs between states (pause / resume / cancel).
+  async setStatusForCampaign(campaignId, fromStatuses, toStatus, extra = {}) {
+    const { data, error } = await supabase
+      .from("jobs")
+      .update({ status: toStatus, ...extra })
+      .eq("campaign_id", campaignId)
+      .in("status", fromStatuses)
+      .select("id");
+    if (error) throw error;
+    return data ? data.length : 0;
+  },
+
+  // Earliest run time among a campaign's pending jobs (to tell running from scheduled).
+  async nextRunAt(campaignId) {
+    const { data, error } = await supabase
+      .from("jobs")
+      .select("run_at")
+      .eq("campaign_id", campaignId)
+      .eq("status", "pending")
+      .order("run_at", { ascending: true })
+      .limit(1);
+    if (error) throw error;
+    return data && data[0] ? data[0].run_at : null;
+  },
+
+  // Someone opted out: drop their queued campaign messages.
+  async cancelPendingForPhone(phone) {
+    const { data, error } = await supabase
+      .from("jobs")
+      .update({ status: "cancelled", error: "Recipient opted out" })
+      .eq("phone", phone)
+      .not("campaign_id", "is", null)
+      .in("status", ["pending", "paused"])
+      .select("campaign_id");
+    if (error) throw error;
+    return data || [];
+  },
+
+  async hasPendingAutoReply(phone) {
+    const { data, error } = await supabase
+      .from("jobs")
+      .select("id")
+      .eq("phone", phone)
+      .is("campaign_id", null)
+      .in("status", ["pending", "processing"])
+      .limit(1);
+    if (error) throw error;
+    return Boolean(data && data.length);
+  },
+
   async getCountsByCampaignId(campaignId) {
     const { data: rpcCounts, error: rpcErr } = await supabase.rpc("get_campaign_job_counts", {
       campaign_uuid: campaignId,
     });
 
     if (!rpcErr && rpcCounts) {
-      let total = 0;
-      let completed = 0;
-      let failed = 0;
-      let pending = 0;
-      let processing = 0;
-
+      const counts = { total: 0, completed: 0, failed: 0, pending: 0, processing: 0, paused: 0, cancelled: 0 };
       rpcCounts.forEach((row) => {
         const count = parseInt(row.count, 10) || 0;
-        total += count;
-        if (row.status === "completed") completed = count;
-        else if (row.status === "failed") failed = count;
-        else if (row.status === "pending") pending = count;
-        else if (row.status === "processing") processing = count;
+        counts.total += count;
+        if (row.status in counts) counts[row.status] = count;
       });
-
-      return { total, completed, failed, pending, processing };
+      return counts;
     } else {
       const { count: total } = await supabase
         .from("jobs")
@@ -114,12 +155,26 @@ const jobRepository = {
         .eq("campaign_id", campaignId)
         .eq("status", "processing");
 
+      const { count: paused } = await supabase
+        .from("jobs")
+        .select("*", { count: "exact", head: true })
+        .eq("campaign_id", campaignId)
+        .eq("status", "paused");
+
+      const { count: cancelled } = await supabase
+        .from("jobs")
+        .select("*", { count: "exact", head: true })
+        .eq("campaign_id", campaignId)
+        .eq("status", "cancelled");
+
       return {
         total: total || 0,
         completed: completed || 0,
         failed: failed || 0,
         pending: pending || 0,
-        processing: processing || 0
+        processing: processing || 0,
+        paused: paused || 0,
+        cancelled: cancelled || 0,
       };
     }
   }

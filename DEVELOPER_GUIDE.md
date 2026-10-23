@@ -260,7 +260,26 @@ conversations, and messages together (always stored in `+E.164` format).
 `get_campaign_job_counts()` for fast campaign stats. These live in the schema/migration SQL —
 if you set up a fresh database, run `supabase_schema.sql`, then `migrations.sql`, then
 `migrations/003_enable_rls.sql`, then `migrations/004_message_media.sql` (stores sent images on
-`messages.media_url` so they show in Chats).
+`messages.media_url` so they show in Chats), then `migrations/005_sending_safeguards.sql` (contact
+consent and "not on WhatsApp" flags, campaign pause reasons, and two SQL helpers for the daily-limit
+and cooldown checks).
+
+### Sending safeguards (protecting the number's quality rating)
+- **Opt-outs:** an incoming STOP / UNSUBSCRIBE (or Meta's "Stop promotions" button) adds the number to
+  `opt_outs`, deactivates the contact, cancels its queued campaign messages and sends a confirmation.
+  START reverses it. Opted-out numbers are never sent campaign messages (`services/optOutService.js`).
+- **Consent:** contacts carry `consent_status` / `consent_source`; imports and the Contacts page can
+  record it, and Bulk send can be limited to consented contacts.
+- **Every campaign goes through `controllers/bulkSendController.js`:** opt-outs blocked, contacts
+  messaged within the cooldown skipped, start moved past quiet hours, and template campaigns split
+  across days to respect the WhatsApp daily conversation limit. `POST /campaigns/preflight` shows the
+  same result before sending.
+- **Automatic pause:** `services/campaignControl.js` pauses a campaign on account/policy errors,
+  persistent rate limits, or when 30%+ of its first 20+ messages fail. Campaigns can also be paused,
+  resumed and cancelled from the UI.
+- **Error categories** in `integrations/twilio/errors.js` drive all of this — e.g. 63049 (Meta held
+  back a marketing message) is never retried quickly, and 63018 (rate limit) backs off.
+- Limits, cooldowns and quiet hours are set in the app's Settings.
 
 ---
 

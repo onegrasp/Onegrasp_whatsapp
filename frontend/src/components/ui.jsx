@@ -85,6 +85,8 @@ const CAMPAIGN_STATUS = {
   completed: { tone: "success", label: "Completed" },
   running: { tone: "info", label: "Running" },
   scheduled: { tone: "neutral", label: "Scheduled" },
+  paused: { tone: "warning", label: "Paused" },
+  cancelled: { tone: "neutral", label: "Cancelled" },
   failed: { tone: "danger", label: "Failed" },
 };
 

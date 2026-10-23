@@ -142,6 +142,9 @@ const normalizePayload = (body) => {
     messageSid: body.MessageSid,
     body: body.Body || "",
     profileName: body.ProfileName || "",
+    // Quick-reply button taps (e.g. Meta's "Stop promotions").
+    buttonText: body.ButtonText || "",
+    buttonPayload: body.ButtonPayload || "",
     numMedia: parseInt(body.NumMedia || "0", 10),
     mediaType0: body.MediaType0 || "",
     messageStatus: body.MessageStatus || null,

@@ -15,7 +15,8 @@ const conversationRepository = {
         contacts (
           name,
           label,
-          is_important
+          is_important,
+          is_active
         )
       `)
       .order("last_timestamp", { ascending: false });

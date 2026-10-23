@@ -19,6 +19,7 @@ const messageService = {
         name: contact?.name || c.contact_name || c.phone,
         label: contact?.label || "none",
         isImportant: contact?.is_important || false,
+        isOptedOut: contact?.is_active === false,
         lastMessage: c.last_message,
         lastDirection: c.last_direction,
         lastStatus: c.last_status,

@@ -14,7 +14,7 @@ const isPlaceholderName = (name, phone) =>
   !name || name === phone || ["unknown", "customer", "valued customer"].includes(String(name).trim().toLowerCase());
 
 const contactService = {
-  async uploadContacts(fileBuffer, targetSet) {
+  async uploadContacts(fileBuffer, targetSet, { consent = false, consentSource = "" } = {}) {
     const { contacts: parsed, issues, totalRows, phoneColumnFound } = await parseContactsFile(fileBuffer);
 
     if (totalRows === 0) {
@@ -39,6 +39,10 @@ const contactService = {
       else toInsert.push(c);
     }
 
+    const consentFields = consent
+      ? { consent_status: "opted_in", consent_source: consentSource, consent_at: new Date().toISOString() }
+      : {};
+
     const failedInserts = await contactRepository.insertMany(
       toInsert.map((c) => ({
         phone: c.phone,
@@ -47,9 +51,16 @@ const contactService = {
         tags: cleanTargetSet ? [cleanTargetSet] : [],
         deleted_at: null,
         updated_at: new Date().toISOString(),
+        ...consentFields,
       }))
     );
     const failedPhones = new Set(failedInserts.map((f) => f.phone));
+
+    // The upload confirmed consent for numbers we already had, too (never
+    // overriding someone who opted out).
+    if (consent && alreadySaved.length > 0) {
+      await contactRepository.recordConsentByIds(alreadySaved.map((c) => c.existing.id), consentSource);
+    }
 
     if (cleanTargetSet && alreadySaved.length > 0) {
       await contactRepository.assignSet(alreadySaved.map((c) => c.existing.id), cleanTargetSet);
@@ -97,12 +108,35 @@ const contactService = {
       duplicates: duplicatesInFile + alreadySaved.length,
       skipped: count("invalid") + duplicatesInFile,
       targetSet: cleanTargetSet || "none",
+      consentRecorded: Boolean(consent) && !contactRepository.optionalColumnsMissing(),
+      consentNotSaved: Boolean(consent) && contactRepository.optionalColumnsMissing(),
       issues: allIssues.slice(0, MAX_REPORTED_ISSUES),
       issuesTotal: allIssues.length,
     };
   },
 
-  async createSingleContact({ name, phone, countryCode, set, label }) {
+  // Records consent (opted in, with where it came from) or an opt-out for
+  // selected contacts.
+  async updateConsent(contactIds, status, source) {
+    if (!Array.isArray(contactIds) || contactIds.length === 0) {
+      throw new AppError("Select at least one contact.", 400, "validation_error");
+    }
+    if (!["opted_in", "opted_out"].includes(status)) {
+      throw new AppError("status must be opted_in or opted_out", 400, "validation_error");
+    }
+    const cleanSource = String(source || "").trim().slice(0, 200);
+    if (status === "opted_in" && !cleanSource) {
+      throw new AppError("Say where the consent came from (e.g. website form, event sign-up).", 400, "validation_error");
+    }
+
+    const rows = await contactRepository.updateConsent(contactIds, status, cleanSource || "Marked by admin");
+    return {
+      updated: rows.length,
+      consentNotSaved: contactRepository.optionalColumnsMissing(),
+    };
+  },
+
+  async createSingleContact({ name, phone, countryCode, set, label, consent = false, consentSource = "" }) {
     const composed = countryCode ? applyCountryCode(countryCode, phone) : phone;
     const { isValid, formatted } = validateAndFormatE164(composed);
 
@@ -119,6 +153,9 @@ const contactService = {
     const contactName = (name || "").trim() || formatted;
 
     const contact = await contactRepository.upsert(formatted, contactName, cleanSet);
+    if (consent) {
+      await contactRepository.recordConsentByIds([contact.id], String(consentSource || "").trim() || "Added by admin");
+    }
     return {
       success: true,
       contact: {
@@ -154,6 +191,10 @@ const contactService = {
       tags: c.tags,
       isActive: c.is_active,
       isImportant: c.is_important,
+      consentStatus: c.is_active === false ? "opted_out" : c.consent_status || "unknown",
+      consentSource: c.consent_source || "",
+      consentAt: c.consent_at || null,
+      invalidReason: c.invalid_reason || "",
       createdAt: c.created_at,
     }));
 

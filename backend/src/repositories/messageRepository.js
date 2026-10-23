@@ -133,6 +133,92 @@ const messageRepository = {
     };
   },
 
+  // Has an agent or auto-reply (not a campaign) written to this phone since?
+  async hasNonCampaignOutgoingSince(phone, sinceISO) {
+    const { data, error } = await supabase
+      .from("messages")
+      .select("id")
+      .eq("phone", phone)
+      .eq("direction", "outgoing")
+      .is("campaign_id", null)
+      .gte("timestamp", sinceISO)
+      .limit(1);
+    if (error) throw error;
+    return Boolean(data && data.length);
+  },
+
+  // Messages recorded for a campaign, and how many failed for reasons that
+  // signal a problem with the list or the content. Meta's per-person
+  // marketing holds and opt-out skips are excluded: they aren't quality issues.
+  async countCampaignHealth(campaignId) {
+    const { count: total } = await supabase
+      .from("messages")
+      .select("*", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .neq("error_category", "opt_out");
+
+    const { count: failed } = await supabase
+      .from("messages")
+      .select("*", { count: "exact", head: true })
+      .eq("campaign_id", campaignId)
+      .in("status", ["failed", "undelivered"])
+      .not("error_category", "in", "(marketing_limit,opt_out)");
+
+    return { total: total || 0, failed: failed || 0 };
+  },
+
+  // Approximate unique people reached with templates (business-initiated
+  // conversations) since a time. Uses the SQL function from migration 005,
+  // falling back to paging through rows.
+  async countBusinessInitiatedSince(sinceISO) {
+    const { data, error } = await supabase.rpc("count_business_initiated_since", { since: sinceISO });
+    if (!error && data !== null && data !== undefined) return Number(data) || 0;
+
+    const phones = new Set();
+    for (let page = 0; page < 50; page++) {
+      const { data: rows, error: pageError } = await supabase
+        .from("messages")
+        .select("phone")
+        .eq("direction", "outgoing")
+        .eq("type", "template")
+        .gte("timestamp", sinceISO)
+        .not("status", "in", "(failed,undelivered)")
+        .range(page * 1000, page * 1000 + 999);
+      if (pageError) throw pageError;
+      (rows || []).forEach((r) => phones.add(r.phone));
+      if (!rows || rows.length < 1000) break;
+    }
+    return phones.size;
+  },
+
+  // Which of these phones received a (non-failed) campaign message since a time.
+  async recentlyContactedPhones(phones, sinceISO) {
+    const list = Array.from(new Set(phones || []));
+    const result = new Set();
+    if (list.length === 0) return result;
+
+    for (let i = 0; i < list.length; i += 300) {
+      const chunk = list.slice(i, i + 300);
+      const { data, error } = await supabase.rpc("recently_contacted_phones", { phone_list: chunk, since: sinceISO });
+      if (!error) {
+        (data || []).forEach((r) => result.add(r.phone));
+        continue;
+      }
+      const { data: rows, error: fallbackError } = await supabase
+        .from("messages")
+        .select("phone")
+        .in("phone", chunk)
+        .eq("direction", "outgoing")
+        .not("campaign_id", "is", null)
+        .gte("timestamp", sinceISO)
+        .not("status", "in", "(failed,undelivered)")
+        .limit(5000);
+      if (fallbackError) throw fallbackError;
+      (rows || []).forEach((r) => result.add(r.phone));
+    }
+    return result;
+  },
+
   async countDeliveredAndRead(campaignId) {
     const { count: deliveredMessages } = await supabase
       .from("messages")

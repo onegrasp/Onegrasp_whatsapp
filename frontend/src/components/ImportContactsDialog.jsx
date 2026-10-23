@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Download, FileSpreadsheet, Upload } from "lucide-react";
 import { uploadContacts } from "../services/api";
 import { Badge, Dialog, ErrorState, Field } from "./ui";
+import ConsentFields from "./ConsentFields";
 import { BUILT_IN_SETS, UPLOAD_ACCEPT, downloadSampleCsv, formatSetName } from "../lib/contacts";
 import { errorMessage, formatNumber } from "../lib/format";
 
@@ -83,6 +84,8 @@ export default function ImportContactsDialog({ open, onClose, defaultSet = "all"
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [consent, setConsent] = useState(false);
+  const [consentSource, setConsentSource] = useState("");
 
   useEffect(() => {
     if (open) {
@@ -90,6 +93,8 @@ export default function ImportContactsDialog({ open, onClose, defaultSet = "all"
       setFile(null);
       setResult(null);
       setError("");
+      setConsent(false);
+      setConsentSource("");
     }
   }, [open, defaultSet]);
 
@@ -108,6 +113,10 @@ export default function ImportContactsDialog({ open, onClose, defaultSet = "all"
     const fd = new FormData();
     fd.append("file", file);
     if (targetSet && targetSet !== "all") fd.append("targetSet", targetSet);
+    if (consent) {
+      fd.append("consent", "true");
+      fd.append("consentSource", consentSource.trim());
+    }
     try {
       const res = await uploadContacts(fd);
       setResult(res.data);
@@ -143,7 +152,7 @@ export default function ImportContactsDialog({ open, onClose, defaultSet = "all"
             <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" form="import-form" className="btn btn-primary" disabled={!file || uploading}>
+            <button type="submit" form="import-form" className="btn btn-primary" disabled={!file || uploading || (consent && !consentSource.trim())}>
               {uploading ? "Importing…" : "Import"}
             </button>
           </>
@@ -153,6 +162,12 @@ export default function ImportContactsDialog({ open, onClose, defaultSet = "all"
       {result ? (
         <>
           <Summary result={result} />
+          {result.consentRecorded && <p className="mt-3 text-13 text-gray-600">Consent recorded for the imported contacts.</p>}
+          {result.consentNotSaved && (
+            <div className="mt-3">
+              <ErrorState message="Contacts were imported, but consent couldn't be stored yet. Run migration 005_sending_safeguards.sql in Supabase, then record consent from the Contacts page." />
+            </div>
+          )}
           <IssuesTable issues={result.issues} total={result.issuesTotal} />
         </>
       ) : (
@@ -210,6 +225,14 @@ export default function ImportContactsDialog({ open, onClose, defaultSet = "all"
               Download template
             </button>
           </div>
+
+          <ConsentFields
+            consent={consent}
+            setConsent={setConsent}
+            source={consentSource}
+            setSource={setConsentSource}
+            label="Everyone in this file agreed to receive WhatsApp messages from us"
+          />
 
           {error && <ErrorState message={error} />}
         </form>

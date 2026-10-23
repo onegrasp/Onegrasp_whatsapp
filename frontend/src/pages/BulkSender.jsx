@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ImagePlus, Maximize2, Send, Upload, Users, X } from "lucide-react";
-import { getContacts, getContactSets, getTemplates, sendBulkMessages, uploadMediaFile } from "../services/api";
+import { campaignPreflight, getContacts, getContactSets, getTemplates, sendBulkMessages, uploadMediaFile } from "../services/api";
 import { useSocket } from "../context/SocketContext";
-import { Dialog, EmptyState, ErrorState, Field, LoadingRows, PageHeader, SegmentedControl, Spinner } from "../components/ui";
+import { Badge, Dialog, EmptyState, ErrorState, Field, LoadingRows, PageHeader, SegmentedControl, Spinner } from "../components/ui";
 import { useConfirm, useToast } from "../components/feedback";
+import { useSettings } from "../components/SettingsDialog";
 import ImportContactsDialog from "../components/ImportContactsDialog";
 import WhatsAppPreview from "../components/WhatsAppPreview";
 import { BUILT_IN_SETS, STATUS_LABELS, customSetsFrom, formatSetName } from "../lib/contacts";
@@ -27,10 +28,113 @@ const getTemplateVariables = (tpl) => {
 const findTemplate = (templates, key) =>
   templates.find((t) => t.content_sid === key || t.name === key || (t._id || t.id) === key);
 
+const isOptedOut = (c) => c.isActive === false || c.consentStatus === "opted_out";
+const hasConsent = (c) => c.consentStatus === "opted_in";
+
+// Contacts "Select all" picks: never opted-out, not known-unreachable, and
+// (when required) only those with recorded consent.
+const isEligible = (c, requireConsent) => !isOptedOut(c) && !c.invalidReason && (!requireConsent || hasConsent(c));
+
+// Rows for the pre-send summary.
+function PreflightSummary({ pre, count, type, templateLabel, campaignName, hasImage, splitChoice }) {
+  const skipped = [
+    [pre.optedOut, "opted out (never messaged)"],
+    [pre.recentlyContacted, `messaged by a campaign in the last ${pre.cooldownDays} day${pre.cooldownDays === 1 ? "" : "s"}`],
+    [pre.noConsent, "without recorded consent"],
+    [pre.invalidFormat, "with an invalid number"],
+  ].filter(([n]) => n > 0);
+
+  const limit = pre.dailyLimit?.limit || 0;
+  const remaining = pre.dailyLimit?.remaining;
+  const overLimit = type === "template" && limit > 0 && remaining !== null && pre.willSend > remaining;
+
+  return (
+    <div className="space-y-3">
+      <dl className="divide-y divide-gray-100 rounded-md border border-gray-200">
+        {[
+          ["Campaign", campaignName],
+          ["Message", type === "template" ? `Template: ${templateLabel}` : "Free text"],
+          ...(hasImage ? [["Image", "Attached"]] : []),
+          ["Selected", formatNumber(count)],
+          ["Will be sent", formatNumber(pre.willSend)],
+          ["Starts", pre.delayedByQuietHours ? `${formatDateTime(pre.startsAt)} (after quiet hours)` : formatDateTime(pre.startsAt)],
+        ].map(([k, v]) => (
+          <div key={k} className="flex justify-between gap-4 px-3 py-2">
+            <dt className="shrink-0 text-gray-500">{k}</dt>
+            <dd className="min-w-0 break-words text-right font-medium text-gray-900">{v}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {skipped.length > 0 && (
+        <div className="rounded-md bg-gray-50 px-3 py-2 text-13">
+          <p className="font-medium text-gray-900">Left out automatically</p>
+          <ul className="mt-1 space-y-0.5 text-gray-600">
+            {skipped.map(([n, why]) => (
+              <li key={why}>
+                {formatNumber(n)} {why}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {pre.withoutConsent > 0 && pre.noConsent === 0 && (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-13 text-amber-900">
+          {formatNumber(pre.withoutConsent)} of these contacts have no recorded consent. Messaging people who didn't opt in leads to
+          blocks, a lower quality rating and lower limits.
+        </p>
+      )}
+      {pre.notOnWhatsApp > 0 && (
+        <p className="text-13 text-gray-600">{formatNumber(pre.notOnWhatsApp)} previously failed as not on WhatsApp and may fail again.</p>
+      )}
+
+      {type === "template" && limit > 0 && (
+        <p className="text-13 text-gray-600">
+          Daily limit: about {formatNumber(pre.dailyLimit.used)} of {formatNumber(limit)} new conversations used in the last 24 hours.
+        </p>
+      )}
+      {type === "template" && limit === 0 && (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-13 text-amber-900">
+          Your WhatsApp daily limit isn't set, so this campaign can't be checked against it. Set it in Settings (from WhatsApp
+          Manager) so large campaigns are split across days instead of failing.
+        </p>
+      )}
+      {overLimit && (
+        <fieldset className="space-y-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-13 text-amber-900">
+          <legend className="sr-only">Daily limit</legend>
+          <p className="font-medium">This campaign is larger than what's left of today's limit ({formatNumber(remaining)}).</p>
+          <label className="flex items-start gap-2">
+            <input type="radio" name="split" defaultChecked onChange={() => (splitChoice.split = true)} className="mt-0.5 accent-brand-600" />
+            <span>
+              Send {formatNumber(remaining)} now and the rest in daily batches of {formatNumber(limit)} (recommended)
+            </span>
+          </label>
+          <label className="flex items-start gap-2">
+            <input type="radio" name="split" onChange={() => (splitChoice.split = false)} className="mt-0.5 accent-brand-600" />
+            <span>Send all now. About {formatNumber(pre.willSend - remaining)} are likely to fail and may hurt the quality rating.</span>
+          </label>
+        </fieldset>
+      )}
+    </div>
+  );
+}
+
 export default function BulkSender() {
   const { socket, connected } = useSocket();
   const toast = useToast();
   const confirm = useConfirm();
+  const { settings, loaded: settingsLoaded } = useSettings();
+  const [requireConsent, setRequireConsent] = useState(false);
+  const [cooldownDays, setCooldownDays] = useState(null);
+  const activeCampaignRef = useRef(null);
+
+  // Start from the configured cooldown once settings load.
+  useEffect(() => {
+    if (cooldownDays === null && settingsLoaded) {
+      setCooldownDays(Number(settings.campaignCooldownDays) || 0);
+    }
+  }, [settings, settingsLoaded, cooldownDays]);
 
   const [contacts, setContacts] = useState([]);
   const [selectedPhones, setSelectedPhones] = useState([]);
@@ -43,6 +147,7 @@ export default function BulkSender() {
   const [filterLabel, setFilterLabel] = useState("all");
   const [customSets, setCustomSets] = useState([]);
   const [sending, setSending] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState("");
   const [loadingContacts, setLoadingContacts] = useState(false);
@@ -134,7 +239,8 @@ export default function BulkSender() {
         page++;
       }
       setContacts(all);
-      setSelectedPhones(all.map((c) => c.phone));
+      // Nothing is pre-selected: recipients are always an explicit choice.
+      setSelectedPhones([]);
     } catch (err) {
       console.error(err);
       setContactsError("Contacts could not be loaded.");
@@ -171,18 +277,35 @@ export default function BulkSender() {
 
   useEffect(() => {
     if (!socket) return;
-    const onProgress = (data) => setProgress(data);
+    const isActive = (data) => !activeCampaignRef.current || data.campaignId === activeCampaignRef.current;
+    const onProgress = (data) => {
+      if (isActive(data)) setProgress(data);
+    };
     const onComplete = (data) => {
+      if (!isActive(data)) return;
+      activeCampaignRef.current = null;
       setSending(false);
       setProgress(null);
       setError("");
       toast.success(`Campaign complete: ${formatNumber(data.sentCount)} sent, ${formatNumber(data.failedCount)} failed.`);
     };
+    // The campaign this page started was paused (manually or by the safety
+    // check) or cancelled.
+    const onUpdate = (data) => {
+      if (!activeCampaignRef.current || data.campaignId !== activeCampaignRef.current) return;
+      if (data.status !== "paused" && data.status !== "cancelled") return;
+      activeCampaignRef.current = null;
+      setSending(false);
+      setProgress(null);
+      toast.error(`Campaign ${data.status}. ${data.statusReason || "See Campaigns for details."}`, { duration: 12000 });
+    };
     socket.on("campaign_progress", onProgress);
     socket.on("campaign_complete", onComplete);
+    socket.on("campaign_update", onUpdate);
     return () => {
       socket.off("campaign_progress", onProgress);
       socket.off("campaign_complete", onComplete);
+      socket.off("campaign_update", onUpdate);
     };
   }, [socket, toast]);
 
@@ -204,8 +327,19 @@ export default function BulkSender() {
     }
   };
 
-  const toggleSelect = (phone) =>
-    setSelectedPhones((prev) => (prev.includes(phone) ? prev.filter((p) => p !== phone) : [...prev, phone]));
+  const toggleSelect = (contact) => {
+    if (isOptedOut(contact)) return;
+    setSelectedPhones((prev) => (prev.includes(contact.phone) ? prev.filter((p) => p !== contact.phone) : [...prev, contact.phone]));
+  };
+
+  const eligibleContacts = contacts.filter((c) => isEligible(c, requireConsent));
+
+  // Requiring consent drops already-selected contacts that don't have it.
+  useEffect(() => {
+    if (!requireConsent) return;
+    const allowed = new Set(contacts.filter(hasConsent).map((c) => c.phone));
+    setSelectedPhones((prev) => prev.filter((p) => allowed.has(p)));
+  }, [requireConsent, contacts]);
 
   const setVariableSource = (v, source) => {
     setVarSources((prev) => ({ ...prev, [v]: source }));
@@ -259,6 +393,8 @@ export default function BulkSender() {
         params: paramsToSend,
         mediaUrl: campaignMediaUrl || undefined,
         scheduledAt: scheduledAtISO,
+        skipRecentDays: cooldownDays ?? undefined,
+        requireConsent,
       },
     };
   };
@@ -272,47 +408,81 @@ export default function BulkSender() {
     setError("");
 
     const count = selectedPhones.length;
+
+    // Ask the server what will actually happen: who is left out and why,
+    // daily-limit usage, and when sending starts (quiet hours).
+    let pre;
+    setChecking(true);
+    try {
+      const res = await campaignPreflight({
+        phones: payload.phones,
+        type: payload.type,
+        skipRecentDays: payload.skipRecentDays,
+        requireConsent: payload.requireConsent,
+        scheduledAt: payload.scheduledAt,
+      });
+      pre = res.data;
+    } catch (err) {
+      setError(errorMessage(err, "Could not check the campaign before sending."));
+      return;
+    } finally {
+      setChecking(false);
+    }
+
+    if (pre.willSend === 0) {
+      setError("Nobody left to send to: every selected contact is opted out, recently messaged, or without consent.");
+      return;
+    }
+
+    const splitChoice = { split: true };
+    const startsLater = isScheduled || pre.delayedByQuietHours;
     const ok = await confirm({
-      title: isScheduled ? "Schedule this campaign?" : "Send this campaign now?",
-      confirmLabel: isScheduled ? "Schedule" : `Send to ${formatNumber(count)}`,
+      title: startsLater ? "Schedule this campaign?" : "Send this campaign now?",
+      confirmLabel: startsLater ? `Schedule for ${formatNumber(pre.willSend)}` : `Send to ${formatNumber(pre.willSend)}`,
       message: (
-        <dl className="divide-y divide-gray-100 rounded-md border border-gray-200">
-          {[
-            ["Campaign", payload.campaignName],
-            ["Recipients", formatNumber(count)],
-            ["Message", msgType === "template" ? `Template: ${selectedTpl?.name || selectedTemplate}` : "Free text"],
-            ...(campaignMediaUrl ? [["Image", "Attached"]] : []),
-            ...(isScheduled ? [["Starts", formatDateTime(scheduledTime)]] : []),
-          ].map(([k, v]) => (
-            <div key={k} className="flex justify-between gap-4 px-3 py-2">
-              <dt className="text-gray-500">{k}</dt>
-              <dd className="truncate text-right font-medium text-gray-900">{v}</dd>
-            </div>
-          ))}
-        </dl>
+        <PreflightSummary
+          pre={pre}
+          count={count}
+          type={msgType}
+          templateLabel={selectedTpl?.name || selectedTemplate}
+          campaignName={payload.campaignName}
+          hasImage={Boolean(campaignMediaUrl)}
+          splitChoice={splitChoice}
+        />
       ),
     });
     if (!ok) return;
 
     setSending(true);
     try {
-      const res = await sendBulkMessages(payload);
-      if (isScheduled) {
+      const res = await sendBulkMessages({ ...payload, splitAcrossDays: splitChoice.split });
+      const data = res.data || {};
+      activeCampaignRef.current = data.campaignId || null;
+      const queued = data.queued ?? pre.willSend;
+      const notes = [
+        data.failed ? `${formatNumber(data.failed)} not sent (opted out or invalid)` : "",
+        data.skippedRecent ? `${formatNumber(data.skippedRecent)} skipped as recently messaged` : "",
+        data.batches > 1 ? `split into ${data.batches} daily batches` : "",
+      ].filter(Boolean);
+
+      if (queued === 0) {
         setSending(false);
-        toast.success(`Campaign scheduled for ${formatDateTime(scheduledTime)} (${formatNumber(count)} contacts).`);
+        toast.error(`No messages were queued. ${notes.join("; ")}.`);
+        return;
+      }
+
+      if (startsLater || (data.startsAt && new Date(data.startsAt) > new Date(Date.now() + 60000))) {
+        setSending(false);
+        toast.success(
+          `Campaign scheduled for ${formatDateTime(data.startsAt || scheduledTime)}: ${formatNumber(queued)} queued${notes.length ? `; ${notes.join("; ")}` : ""}.`
+        );
         setIsScheduled(false);
         setScheduledTime("");
         setCampaignName("");
         return;
       }
-      const queued = res.data?.queued ?? count;
-      const skipped = res.data?.failed || 0;
-      if (queued === 0) {
-        setSending(false);
-        toast.error(`No messages were queued. ${formatNumber(skipped)} numbers were invalid or opted out.`);
-        return;
-      }
-      toast.info(`Campaign started: ${formatNumber(queued)} queued${skipped ? `, ${formatNumber(skipped)} skipped` : ""}.`);
+
+      toast.info(`Campaign started: ${formatNumber(queued)} queued${notes.length ? `; ${notes.join("; ")}` : ""}.`);
       // Progress arrives over the live connection; without it, follow up in Campaigns.
       if (!connected) setSending(false);
     } catch (err) {
@@ -321,7 +491,8 @@ export default function BulkSender() {
     }
   };
 
-  const allSelected = contacts.length > 0 && selectedPhones.length === contacts.length;
+  const allSelected = eligibleContacts.length > 0 && eligibleContacts.every((c) => selectedPhones.includes(c.phone));
+  const optedOutCount = contacts.filter(isOptedOut).length;
   const previewBody = msgType === "template" ? renderTemplateBodyPreview(selectedTpl) : freeText.replace(/\{\{name\}\}/gi, SAMPLE_NAME).replace(/\{\{phone\}\}/gi, SAMPLE_PHONE);
   const previewImage = campaignMediaUrl || selectedTpl?.header_image_url || selectedTpl?.headerImageUrl || "";
   const setOptions = [...BUILT_IN_SETS.map((s) => s.value), ...customSets];
@@ -370,22 +541,23 @@ export default function BulkSender() {
                     <input
                       type="checkbox"
                       className="checkbox"
-                      aria-label="Select all recipients"
+                      aria-label="Select all eligible recipients"
                       checked={allSelected}
-                      onChange={() => setSelectedPhones(allSelected ? [] : contacts.map((c) => c.phone))}
+                      onChange={() => setSelectedPhones(allSelected ? [] : eligibleContacts.map((c) => c.phone))}
                     />
                   </th>
                   <th>Name</th>
                   <th>Phone</th>
                   <th>Set / label</th>
+                  <th>Consent</th>
                 </tr>
               </thead>
               <tbody>
                 {loadingContacts ? (
-                  <LoadingRows rows={6} cols={4} />
+                  <LoadingRows rows={6} cols={5} />
                 ) : contacts.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="h-auto">
+                    <td colSpan={5} className="h-auto">
                       <EmptyState
                         icon={Users}
                         title="No contacts in this selection"
@@ -401,21 +573,41 @@ export default function BulkSender() {
                 ) : (
                   contacts.map((c) => {
                     const checked = selectedPhones.includes(c.phone);
+                    const blocked = isOptedOut(c);
+                    const consentLocked = requireConsent && !hasConsent(c) && !blocked;
+                    const disabled = blocked || consentLocked;
                     return (
-                      <tr key={c._id} onClick={() => toggleSelect(c.phone)} className={`cursor-pointer ${checked ? "bg-brand-50/40" : "hover:bg-gray-50"}`}>
+                      <tr
+                        key={c._id}
+                        onClick={() => !disabled && toggleSelect(c)}
+                        className={disabled ? "text-gray-400" : `cursor-pointer ${checked ? "bg-brand-50/40" : "hover:bg-gray-50"}`}
+                      >
                         <td className="pl-4 sm:pl-6 lg:pl-8">
                           <input
                             type="checkbox"
-                            className="checkbox"
+                            className="checkbox disabled:cursor-not-allowed"
                             aria-label={`Select ${c.name}`}
                             checked={checked}
-                            onChange={() => toggleSelect(c.phone)}
+                            disabled={disabled}
+                            onChange={() => toggleSelect(c)}
                             onClick={(e) => e.stopPropagation()}
                           />
                         </td>
-                        <td className="whitespace-nowrap text-gray-900">{c.name}</td>
+                        <td className={`whitespace-nowrap ${disabled ? "" : "text-gray-900"}`}>{c.name}</td>
                         <td className="num whitespace-nowrap">{c.phone}</td>
-                        <td className="text-gray-500">{c.label && c.label !== "none" ? formatSetName(c.label) : "—"}</td>
+                        <td className={disabled ? "" : "text-gray-500"}>{c.label && c.label !== "none" ? formatSetName(c.label) : "—"}</td>
+                        <td>
+                          <div className="flex flex-wrap gap-1">
+                            {blocked ? (
+                              <Badge tone="danger">Opted out</Badge>
+                            ) : hasConsent(c) ? (
+                              <Badge tone="success">Opted in</Badge>
+                            ) : (
+                              <Badge>Not recorded</Badge>
+                            )}
+                            {c.invalidReason && <Badge tone="warning">Not on WhatsApp</Badge>}
+                          </div>
+                        </td>
                       </tr>
                     );
                   })
@@ -427,14 +619,16 @@ export default function BulkSender() {
           <div className="flex items-center justify-between border-t border-gray-200 px-4 py-2.5 text-13 sm:px-6 lg:px-8">
             <span className="tabular-nums text-gray-600">
               <strong className="font-semibold text-gray-900">{formatNumber(selectedPhones.length)}</strong> of {formatNumber(contacts.length)} selected
+              {optedOutCount > 0 && <span className="text-gray-400"> · {formatNumber(optedOutCount)} opted out</span>}
             </span>
             <button
               type="button"
-              className="font-medium text-brand-700 hover:text-brand-800"
-              onClick={() => setSelectedPhones(allSelected ? [] : contacts.map((c) => c.phone))}
-              disabled={contacts.length === 0}
+              className="font-medium text-brand-700 hover:text-brand-800 disabled:text-gray-400"
+              onClick={() => setSelectedPhones(allSelected ? [] : eligibleContacts.map((c) => c.phone))}
+              disabled={eligibleContacts.length === 0}
+              title="Selects everyone who can be messaged: not opted out, not known to be unreachable"
             >
-              {allSelected ? "Clear selection" : "Select all"}
+              {allSelected ? "Clear selection" : `Select all eligible (${formatNumber(eligibleContacts.length)})`}
             </button>
           </div>
         </section>
@@ -619,6 +813,31 @@ export default function BulkSender() {
                 </div>
               )}
             </div>
+
+            <fieldset className="space-y-3 border-t border-gray-200 pt-4">
+              <legend className="text-sm font-medium text-gray-700">Recipient safeguards</legend>
+              <label className="flex cursor-pointer items-start gap-2 text-sm text-gray-700">
+                <input type="checkbox" className="checkbox mt-0.5" checked={requireConsent} onChange={(e) => setRequireConsent(e.target.checked)} />
+                <span>
+                  Only contacts with recorded consent
+                  <span className="block text-xs text-gray-500">Recommended for marketing. Record consent on the Contacts page.</span>
+                </span>
+              </label>
+              <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+                <label htmlFor="cooldown-days">Skip contacts messaged by a campaign in the last</label>
+                <input
+                  id="cooldown-days"
+                  type="number"
+                  min="0"
+                  max="60"
+                  className="input input-sm w-16 tabular-nums"
+                  value={cooldownDays ?? ""}
+                  onChange={(e) => setCooldownDays(Math.max(0, Number(e.target.value) || 0))}
+                />
+                <span>days</span>
+              </div>
+              <p className="text-xs text-gray-500">Opted-out contacts are never messaged. Quiet hours and your daily limit are applied automatically (Settings).</p>
+            </fieldset>
           </div>
 
           <div className="sticky bottom-0 space-y-3 border-t border-gray-200 bg-white px-4 py-4 sm:px-6">
@@ -634,8 +853,13 @@ export default function BulkSender() {
                 </div>
               </div>
             )}
-            <button type="button" onClick={handleSend} disabled={sending || selectedPhones.length === 0} className="btn btn-primary w-full">
-              {sending ? (
+            <button type="button" onClick={handleSend} disabled={sending || checking || selectedPhones.length === 0} className="btn btn-primary w-full">
+              {checking ? (
+                <>
+                  <Spinner size={14} className="text-white" />
+                  Checking recipients…
+                </>
+              ) : sending ? (
                 <>
                   <Spinner size={14} className="text-white" />
                   {isScheduled ? "Scheduling…" : "Sending…"}

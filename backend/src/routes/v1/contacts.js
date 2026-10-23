@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const { uploadContacts, getContacts, getContactSets, assignSet, removeSet, createSingle, deleteBulk, updateLabel, deleteContact, exportContacts, toggleImportant } = require("../../controllers/contactController");
+const { uploadContacts, getContacts, getContactSets, assignSet, removeSet, createSingle, deleteBulk, updateLabel, deleteContact, exportContacts, toggleImportant, updateConsent } = require("../../controllers/contactController");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -12,6 +12,7 @@ router.post("/bulk-delete", deleteBulk);
 router.get("/sets", getContactSets);
 router.post("/sets/assign", assignSet);
 router.post("/sets/remove", removeSet);
+router.post("/consent", updateConsent);
 router.patch("/:id/label", updateLabel);
 router.delete("/:id", deleteContact);
 router.get("/export", exportContacts);

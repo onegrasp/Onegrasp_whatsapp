@@ -1,10 +1,11 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, ChevronRight, Megaphone } from "lucide-react";
-import { getCampaigns, getCampaignMessages } from "../services/api";
+import { getCampaigns, getCampaignMessages, pauseCampaign, resumeCampaign, cancelCampaign } from "../services/api";
 import { useSocket } from "../context/SocketContext";
 import { EmptyState, ErrorState, LoadingRows, Page, PageHeader, Spinner, StatusBadge } from "../components/ui";
-import { formatDateTime, formatNumber } from "../lib/format";
+import { useConfirm, useToast } from "../components/feedback";
+import { errorMessage, formatDateTime, formatNumber } from "../lib/format";
 
 const CAMPAIGN_LIMIT = 50; // the API returns the most recent 50
 
@@ -62,8 +63,38 @@ function CampaignLog({ loading, messages }) {
   );
 }
 
+function CampaignActions({ campaign, busy, onAction }) {
+  const { status } = campaign;
+  const stop = (fn) => (e) => {
+    e.stopPropagation();
+    fn();
+  };
+  return (
+    <div className="flex justify-end gap-1">
+      {(status === "running" || status === "scheduled") && (
+        <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={stop(() => onAction("pause", campaign))}>
+          Pause
+        </button>
+      )}
+      {status === "paused" && (
+        <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={stop(() => onAction("resume", campaign))}>
+          Resume
+        </button>
+      )}
+      {(status === "running" || status === "scheduled" || status === "paused") && (
+        <button type="button" className="btn btn-danger-ghost btn-sm" disabled={busy} onClick={stop(() => onAction("cancel", campaign))}>
+          Cancel
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function Campaigns() {
   const { socket } = useSocket();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [busyId, setBusyId] = useState(null);
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -102,6 +133,7 @@ export default function Campaigns() {
                 readCount: data.readCount,
                 failedCount: data.failedCount,
                 status: data.status || c.status,
+                statusReason: data.statusReason ?? c.statusReason,
               }
             : c
         )
@@ -121,6 +153,32 @@ export default function Campaigns() {
       socket.off("status_update", handleStatusUpdate);
     };
   }, [socket]);
+
+  const runAction = async (action, campaign) => {
+    if (action === "cancel") {
+      const ok = await confirm({
+        title: "Cancel this campaign?",
+        message: `Messages already sent stay sent. The remaining unsent messages for "${campaign.name}" will be dropped and can't be resumed.`,
+        confirmLabel: "Cancel campaign",
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
+    setBusyId(campaign._id);
+    try {
+      if (action === "pause") await pauseCampaign(campaign._id);
+      if (action === "resume") await resumeCampaign(campaign._id);
+      if (action === "cancel") await cancelCampaign(campaign._id);
+      toast.success(
+        action === "pause" ? "Campaign paused. Messages already being sent will finish." : action === "resume" ? "Campaign resumed" : "Campaign cancelled"
+      );
+      loadCampaigns();
+    } catch (err) {
+      toast.error(errorMessage(err, `Could not ${action} the campaign.`));
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const toggleExpand = async (campaignId) => {
     if (expandedId === campaignId) {
@@ -183,11 +241,14 @@ export default function Campaigns() {
                   <th className="text-right">Read</th>
                   <th className="text-right">Failed</th>
                   <th className="w-40">Delivery rate</th>
+                  <th className="text-right">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <LoadingRows rows={5} cols={9} />
+                  <LoadingRows rows={5} cols={10} />
                 ) : (
                   campaigns.map((c) => {
                     const expanded = expandedId === c._id;
@@ -214,6 +275,9 @@ export default function Campaigns() {
                             <p className="text-xs text-gray-500">
                               {c.templateName ? `Template · ${c.templateName}` : "Free text"} · {formatDateTime(c.createdAt)}
                             </p>
+                            {c.statusReason && (c.status === "paused" || c.status === "cancelled") && (
+                              <p className={`mt-1 max-w-md text-xs ${c.status === "paused" ? "text-amber-800" : "text-gray-500"}`}>{c.statusReason}</p>
+                            )}
                           </td>
                           <td>
                             <StatusBadge kind="campaign" status={c.status} />
@@ -231,10 +295,13 @@ export default function Campaigns() {
                               <span className="w-9 text-right tabular-nums text-gray-900">{rate}%</span>
                             </div>
                           </td>
+                          <td>
+                            <CampaignActions campaign={c} busy={busyId === c._id} onAction={runAction} />
+                          </td>
                         </tr>
                         {expanded && (
                           <tr>
-                            <td colSpan={9} className="h-auto border-b border-gray-200 bg-gray-50 p-0">
+                            <td colSpan={10} className="h-auto border-b border-gray-200 bg-gray-50 p-0">
                               <div className="m-3 rounded-md border border-gray-200 bg-white">
                                 <CampaignLog loading={loadingMessages} messages={campaignMessages} />
                               </div>

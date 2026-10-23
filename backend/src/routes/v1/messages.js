@@ -1,7 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const { getConversations, getMessages, getStats, sendMessage } = require("../../controllers/messageController");
-const { sendBulk, sendSingle } = require("../../controllers/sendController");
+const { sendSingle } = require("../../controllers/sendController");
+const { sendBulk } = require("../../controllers/bulkSendController");
 
 router.get("/conversations", getConversations);
 router.get("/messages/:phone", getMessages);

@@ -91,6 +91,8 @@ const handleTwilioIncomingMessage = async (req, res, next) => {
       messageSid: payload.messageSid,
       body: payload.body,
       profileName: payload.profileName,
+      buttonText: payload.buttonText,
+      buttonPayload: payload.buttonPayload,
       type,
     });
 
@@ -112,7 +114,10 @@ const handleTwilioStatusUpdate = async (req, res, next) => {
 
     if (payload.messageStatus === "failed" || payload.messageStatus === "undelivered") {
       const errorMap = mapTwilioError({ code: parseInt(payload.errorCode, 10), message: payload.errorMessage });
-      errorDetails = `Twilio Error ${payload.errorCode}: ${payload.errorMessage}`.trim();
+      // Known codes get a plain-language reason; callbacks often omit ErrorMessage.
+      errorDetails = errorMap.category !== "other"
+        ? errorMap.message
+        : `Twilio Error ${payload.errorCode}: ${payload.errorMessage || "Message not delivered"}`.trim();
       errorCategory = errorMap.category;
     }
 

@@ -1,7 +1,6 @@
 const jobRepository = require("../repositories/jobRepository");
 const settingsRepository = require("../repositories/settingsRepository");
 const campaignRepository = require("../repositories/campaignRepository");
-const messageRepository = require("../repositories/messageRepository");
 const campaignWorker = require("./campaignWorker");
 const webhookWorker = require("./webhookWorker");
 const templateSyncWorker = require("./templateSyncWorker");
@@ -9,7 +8,9 @@ const mediaWorker = require("./mediaWorker");
 const analyticsWorker = require("./analyticsWorker");
 const retryWorker = require("./retryWorker");
 const statusSyncWorker = require("./statusSyncWorker");
-const { getIo } = require("../socket");
+const { refreshCampaignProgress } = require("../services/campaignProgress");
+const { getSafeguards, quietHoursOptions } = require("../services/sendingPolicy");
+const { quietHoursEnd } = require("../utils/quietHours");
 const logger = require("../utils/logger");
 
 let isRunning = false;
@@ -38,7 +39,68 @@ const recoverStaleJobs = async () => {
   }
 };
 
-const start = (socketIo) => {
+/**
+ * Checks a pulled campaign job against the campaign's state and quiet hours.
+ * Returns true if the job should be sent now; otherwise parks it and returns false.
+ * Auto-replies and other non-campaign jobs always go through.
+ */
+const admitCampaignJob = async (job) => {
+  if (!job.campaign_id) return true;
+
+  const campaign = await campaignRepository.findById(job.campaign_id).catch(() => null);
+  if (campaign && (campaign.status === "paused" || campaign.status === "cancelled")) {
+    await jobRepository.update(job.id, { status: campaign.status });
+    return false;
+  }
+
+  const safeguards = await getSafeguards();
+  const resumeAt = quietHoursEnd(new Date(), quietHoursOptions(safeguards));
+  if (resumeAt) {
+    await jobRepository.update(job.id, { status: "pending", run_at: resumeAt.toISOString() });
+    logger.info(`Quiet hours: campaign message to ${job.phone} held until ${resumeAt.toISOString()}`);
+    return false;
+  }
+
+  return true;
+};
+
+const runJob = async (job) => {
+  if (job.type === "template" || job.type === "text") {
+    await campaignWorker.process(job);
+  } else if (job.type === "webhook_event") {
+    await webhookWorker.process(job);
+  } else if (job.type === "template_sync") {
+    await templateSyncWorker.process(job);
+  } else if (job.type === "media_upload") {
+    await mediaWorker.process(job);
+  } else if (job.type === "analytics_update") {
+    await analyticsWorker.process(job);
+  } else {
+    logger.warn(`Unknown job type: ${job.type}. Defaulting to campaign processing.`);
+    await campaignWorker.process(job);
+  }
+};
+
+// Runs one pulled job end to end. Returns true if it was sent.
+const handleJob = async (job) => {
+  if (!(await admitCampaignJob(job))) return false;
+
+  logger.info(`Processing job ${job.id} (type: ${job.type}) for phone ${job.phone}`);
+  try {
+    await runJob(job);
+    await jobRepository.update(job.id, { status: "completed" });
+    await refreshCampaignProgress(job.campaign_id, { phone: job.phone, status: "sent" });
+    return true;
+  } catch (err) {
+    const result = await retryWorker.scheduleRetry(job, err);
+    if (result.type === "permanent_fail") {
+      await refreshCampaignProgress(job.campaign_id, { phone: job.phone, status: "failed" });
+    }
+    return false;
+  }
+};
+
+const start = () => {
   if (isRunning) return;
   isRunning = true;
   logger.info("Specialized Queue worker dispatcher started");
@@ -71,30 +133,7 @@ const processQueue = async () => {
       return;
     }
 
-    logger.info(`Processing job ${job.id} (type: ${job.type}) for phone ${job.phone}`);
-
-    try {
-      if (job.type === "template" || job.type === "text") {
-        await campaignWorker.process(job);
-      } else if (job.type === "webhook_event") {
-        await webhookWorker.process(job);
-      } else if (job.type === "template_sync") {
-        await templateSyncWorker.process(job);
-      } else if (job.type === "media_upload") {
-        await mediaWorker.process(job);
-      } else if (job.type === "analytics_update") {
-        await analyticsWorker.process(job);
-      } else {
-        logger.warn(`Unknown job type: ${job.type}. Defaulting to campaign processing.`);
-        await campaignWorker.process(job);
-      }
-
-      await jobRepository.update(job.id, { status: "completed" });
-      await updateCampaignProgress(job.campaign_id, job.phone, "sent");
-
-    } catch (err) {
-      await retryWorker.scheduleRetry(job, err);
-    }
+    await handleJob(job);
 
     let sendingRate = 2;
     try {
@@ -108,74 +147,9 @@ const processQueue = async () => {
 
     const delayMs = Math.max(100, Math.round(1000 / sendingRate));
     workerLoopTimeout = setTimeout(processQueue, delayMs);
-
   } catch (globalErr) {
     logger.error("Error in specialized queue dispatcher process loop", { error: globalErr });
     workerLoopTimeout = setTimeout(processQueue, 2000);
-  }
-};
-
-const updateCampaignProgress = async (campaignId, phone, status) => {
-  if (!campaignId) return;
-
-  const io = getIo();
-  try {
-    const counts = await jobRepository.getCountsByCampaignId(campaignId);
-    const { deliveredCount, readCount } = await messageRepository.countDeliveredAndRead(campaignId);
-
-    // Recipients that failed pre-flight validation (invalid phone, opt-out)
-    // never became job rows, so account for them explicitly instead of letting
-    // the job-only counts overwrite and hide them.
-    let campaign = null;
-    try { campaign = await campaignRepository.findById(campaignId); } catch (e) { /* ignore */ }
-    const totalContacts = (campaign && campaign.total_contacts) || counts.total;
-    const preflightFailed = Math.max(0, totalContacts - counts.total);
-
-    const processedJobs = counts.completed + counts.failed;
-    const totalFailed = counts.failed + preflightFailed;
-    const allProcessed = counts.total === 0 ? true : processedJobs >= counts.total;
-    const campaignStatus = allProcessed ? "completed" : "running";
-
-    await campaignRepository.update(campaignId, {
-      sent_count: counts.completed,
-      failed_count: totalFailed,
-      delivered_count: deliveredCount,
-      read_count: readCount,
-      status: campaignStatus,
-    });
-
-    const processedIncludingPreflight = processedJobs + preflightFailed;
-    const progressPercent = totalContacts > 0 ? Math.round((processedIncludingPreflight / totalContacts) * 100) : 0;
-
-    if (io) {
-      if (allProcessed) {
-        io.emit("campaign_complete", {
-          campaignId,
-          sentCount: counts.completed,
-          failedCount: totalFailed,
-          total: totalContacts,
-        });
-      } else {
-        io.emit("campaign_progress", {
-          campaignId,
-          phone,
-          status,
-          progress: progressPercent,
-        });
-      }
-
-      io.emit("campaign_update", {
-        campaignId,
-        sentCount: counts.completed,
-        failedCount: totalFailed,
-        deliveredCount: deliveredCount,
-        readCount: readCount,
-        status: campaignStatus,
-      });
-    }
-
-  } catch (err) {
-    logger.error("Failed to update campaign progress counts:", { campaignId, error: err });
   }
 };
 
@@ -184,30 +158,9 @@ const processBatch = async (maxJobs = 50) => {
   for (let i = 0; i < maxJobs; i++) {
     const job = await jobRepository.pullPendingJob();
     if (!job) break;
-
-    try {
-      if (job.type === "template" || job.type === "text") {
-        await campaignWorker.process(job);
-      } else if (job.type === "webhook_event") {
-        await webhookWorker.process(job);
-      } else if (job.type === "template_sync") {
-        await templateSyncWorker.process(job);
-      } else if (job.type === "media_upload") {
-        await mediaWorker.process(job);
-      } else if (job.type === "analytics_update") {
-        await analyticsWorker.process(job);
-      } else {
-        await campaignWorker.process(job);
-      }
-
-      await jobRepository.update(job.id, { status: "completed" });
-      await updateCampaignProgress(job.campaign_id, job.phone, "sent");
-      processedCount++;
-    } catch (err) {
-      await retryWorker.scheduleRetry(job, err);
-    }
+    if (await handleJob(job)) processedCount++;
   }
   return processedCount;
 };
 
-module.exports = { start, stop, processBatch };
+module.exports = { start, stop, processBatch, admitCampaignJob };

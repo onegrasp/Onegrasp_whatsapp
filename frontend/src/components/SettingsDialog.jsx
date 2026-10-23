@@ -16,9 +16,25 @@ const DEFAULTS = {
   twilioMessagingServiceSid: "",
   validateWebhookSignature: false,
   sendingRate: 2,
+  autoReplyCooldownHours: 12,
+  dailyConversationLimit: 0,
+  campaignCooldownDays: 3,
+  quietHoursEnabled: true,
+  quietHoursStart: "21:00",
+  quietHoursEnd: "09:00",
+  quietHoursTimezone: "Asia/Kolkata",
 };
 
+const valueOr = (value, fallback) => (value === undefined || value === null || value === "" ? fallback : value);
+
 const fromResponse = (data = {}) => ({
+  autoReplyCooldownHours: valueOr(data.autoReplyCooldownHours, DEFAULTS.autoReplyCooldownHours),
+  dailyConversationLimit: valueOr(data.dailyConversationLimit, DEFAULTS.dailyConversationLimit),
+  campaignCooldownDays: valueOr(data.campaignCooldownDays, DEFAULTS.campaignCooldownDays),
+  quietHoursEnabled: data.quietHoursEnabled === undefined ? DEFAULTS.quietHoursEnabled : data.quietHoursEnabled === true || data.quietHoursEnabled === "true",
+  quietHoursStart: valueOr(data.quietHoursStart, DEFAULTS.quietHoursStart),
+  quietHoursEnd: valueOr(data.quietHoursEnd, DEFAULTS.quietHoursEnd),
+  quietHoursTimezone: valueOr(data.quietHoursTimezone, DEFAULTS.quietHoursTimezone),
   autoReplyEnabled: Boolean(data.autoReplyEnabled),
   autoReplyMessage: data.autoReplyMessage || "",
   twilioMode: data.twilioMode || "sandbox",
@@ -32,6 +48,7 @@ const fromResponse = (data = {}) => ({
 
 export function SettingsProvider({ children }) {
   const [settings, setSettings] = useState(DEFAULTS);
+  const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -40,6 +57,8 @@ export function SettingsProvider({ children }) {
       setSettings(fromResponse(res.data));
     } catch (err) {
       console.error("Failed to load settings:", err);
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -48,7 +67,7 @@ export function SettingsProvider({ children }) {
   }, [refresh]);
 
   return (
-    <SettingsContext.Provider value={{ settings, openSettings: () => setOpen(true) }}>
+    <SettingsContext.Provider value={{ settings, loaded, openSettings: () => setOpen(true) }}>
       {children}
       <SettingsDialog
         open={open}
@@ -148,6 +167,75 @@ function SettingsDialog({ open, initial, onClose, onSaved }) {
               />
             )}
           </Field>
+          <Field
+            label="Don't repeat the auto-reply within"
+            hint="Hours. Also skipped while an agent has replied to that person in this time. 0 sends it every time."
+          >
+            {(id) => (
+              <div className="flex items-center gap-2">
+                <input id={id} type="number" min="0" max="168" step="1" className="input w-24 tabular-nums" value={form.autoReplyCooldownHours} onChange={(e) => set("autoReplyCooldownHours")(e.target.value)} disabled={!form.autoReplyEnabled} />
+                <span className="text-sm text-gray-500">hours</span>
+              </div>
+            )}
+          </Field>
+        </section>
+
+        <section className="space-y-4 border-t border-gray-200 pt-5">
+          <div>
+            <h3 className="section-title">Sending safeguards</h3>
+            <p className="mt-0.5 text-xs text-gray-500">Protect your number's quality rating and avoid messaging limits.</p>
+          </div>
+
+          <Field
+            label="WhatsApp daily conversation limit"
+            hint="Your messaging limit from WhatsApp Manager (e.g. 250, 2000, 10000). Bulk send warns before exceeding it and can split a campaign across days. 0 turns the check off."
+          >
+            {(id) => (
+              <input id={id} type="number" min="0" step="1" className="input w-36 tabular-nums" value={form.dailyConversationLimit} onChange={(e) => set("dailyConversationLimit")(e.target.value)} />
+            )}
+          </Field>
+
+          <Field
+            label="Skip contacts messaged by a campaign within"
+            hint="Default for Bulk send, so nobody gets several campaigns in a row. 0 turns it off."
+          >
+            {(id) => (
+              <div className="flex items-center gap-2">
+                <input id={id} type="number" min="0" max="60" step="1" className="input w-24 tabular-nums" value={form.campaignCooldownDays} onChange={(e) => set("campaignCooldownDays")(e.target.value)} />
+                <span className="text-sm text-gray-500">days</span>
+              </div>
+            )}
+          </Field>
+
+          <Toggle
+            checked={form.quietHoursEnabled}
+            onChange={set("quietHoursEnabled")}
+            label="Quiet hours"
+            description="Hold campaign messages overnight and send them when quiet hours end. Chats and auto-replies are not affected."
+          />
+          {form.quietHoursEnabled && (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field label="From">
+                {(id) => <input id={id} type="time" className="input" value={form.quietHoursStart} onChange={(e) => set("quietHoursStart")(e.target.value)} />}
+              </Field>
+              <Field label="Until">
+                {(id) => <input id={id} type="time" className="input" value={form.quietHoursEnd} onChange={(e) => set("quietHoursEnd")(e.target.value)} />}
+              </Field>
+              <Field label="Timezone">
+                {(id) => (
+                  <select id={id} className="input" value={form.quietHoursTimezone} onChange={(e) => set("quietHoursTimezone")(e.target.value)}>
+                    {[form.quietHoursTimezone, "Asia/Kolkata", "Asia/Dubai", "Asia/Singapore", "Europe/London", "America/New_York", "UTC"]
+                      .filter((tz, i, all) => tz && all.indexOf(tz) === i)
+                      .map((tz) => (
+                        <option key={tz} value={tz}>
+                          {tz}
+                        </option>
+                      ))}
+                  </select>
+                )}
+              </Field>
+            </div>
+          )}
         </section>
 
         <section className="space-y-4 border-t border-gray-200 pt-5">
@@ -206,13 +294,13 @@ function SettingsDialog({ open, initial, onClose, onSaved }) {
             description="Rejects delivery updates and replies that aren't signed by Twilio."
           />
 
-          <Field label="Sending rate" hint="Messages per second for bulk campaigns.">
+          <Field label="Sending rate" hint="Messages per second for bulk campaigns (0.1 to 10). Keep it low for new numbers.">
             {(id) => (
               <input
                 id={id}
                 type="number"
                 min="0.1"
-                max="100"
+                max="10"
                 step="0.1"
                 className="input w-32 tabular-nums"
                 value={form.sendingRate}

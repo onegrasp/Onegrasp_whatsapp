@@ -7,7 +7,12 @@ const uploadContacts = async (req, res, next) => {
       return res.status(400).json({ error: { code: "validation_error", message: "No file uploaded" } });
     }
     const targetSet = req.body?.targetSet || req.query?.targetSet || null;
-    const result = await contactService.uploadContacts(req.file.buffer, targetSet);
+    const consent = req.body?.consent === "true" || req.body?.consent === true;
+    const consentSource = String(req.body?.consentSource || "").trim().slice(0, 200);
+    if (consent && !consentSource) {
+      return res.status(400).json({ error: { code: "validation_error", message: "Say where these contacts gave consent (e.g. website form)." } });
+    }
+    const result = await contactService.uploadContacts(req.file.buffer, targetSet, { consent, consentSource });
     res.json(result);
   } catch (err) {
     next(err);
@@ -99,6 +104,16 @@ const assignSet = async (req, res, next) => {
   }
 };
 
+const updateConsent = async (req, res, next) => {
+  try {
+    const { contactIds, status, source } = req.body || {};
+    const result = await contactService.updateConsent(contactIds, status, source);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+};
+
 const removeSet = async (req, res, next) => {
   try {
     const { contactIds, setName } = req.body;
@@ -121,4 +136,5 @@ module.exports = {
   deleteContact,
   exportContacts,
   toggleImportant,
+  updateConsent,
 };

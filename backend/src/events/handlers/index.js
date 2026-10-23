@@ -4,8 +4,12 @@ const messageRepository = require("../../repositories/messageRepository");
 const conversationRepository = require("../../repositories/conversationRepository");
 const jobRepository = require("../../repositories/jobRepository");
 const settingsRepository = require("../../repositories/settingsRepository");
-const campaignRepository = require("../../repositories/campaignRepository");
 const twilioService = require("../../services/twilioService");
+const settingsService = require("../../services/settingsService");
+const { refreshCampaignProgress } = require("../../services/campaignProgress");
+const { onCampaignFailure } = require("../../services/campaignControl");
+const { handleConsentKeyword } = require("../../services/optOutService");
+const { detectConsentKeyword } = require("../../utils/keywords");
 const { getIo } = require("../../socket");
 const logger = require("../../utils/logger");
 
@@ -25,11 +29,52 @@ const isStatusRegression = (current, next) => {
   return nextRank < currentRank;
 };
 
+/**
+ * Auto-reply only when it helps: not while an agent (or a previous
+ * auto-reply) has written to this person within the cooldown, and not when an
+ * auto-reply is already queued. Prevents reply storms and bot-to-bot loops.
+ */
+const shouldAutoReply = async (phone, cooldownHours) => {
+  if (await jobRepository.hasPendingAutoReply(phone)) return false;
+  if (cooldownHours > 0) {
+    const since = new Date(Date.now() - cooldownHours * 60 * 60 * 1000).toISOString();
+    if (await messageRepository.hasNonCampaignOutgoingSince(phone, since)) return false;
+  }
+  return true;
+};
+
+const queueAutoReply = async (from) => {
+  const settings = await settingsRepository.findAll();
+  const config = {};
+  (settings || []).forEach((s) => {
+    config[s.key] = s.value;
+  });
+  if (String(config.autoReplyEnabled) !== "true") return;
+
+  const { autoReplyCooldownHours } = await settingsService.getSafeguards();
+  if (!(await shouldAutoReply(from, autoReplyCooldownHours))) {
+    logger.info(`Auto-reply skipped for ${from} (cooldown or conversation in progress).`);
+    return;
+  }
+
+  const autoReplyMessage = config.autoReplyMessage || "Thank you for reaching out! We have received your message.";
+  logger.info(`Queuing auto-reply job to ${from}`);
+  await jobRepository.create({
+    campaign_id: null,
+    phone: from,
+    type: "text",
+    message: autoReplyMessage,
+    status: "pending",
+    attempts: 0,
+    max_attempts: 3,
+    run_at: new Date(Date.now() + 1000).toISOString(),
+  });
+};
+
 const registerHandlers = () => {
   eventBus.subscribe("IncomingMessageEvent", async (payload) => {
     logger.info("Handling IncomingMessageEvent inside event handlers", { messageSid: payload.messageSid });
-    const rawFrom = payload.from;
-    const from = normalizePhone(rawFrom);
+    const from = normalizePhone(payload.from);
     const { messageSid, body, profileName } = payload;
     const io = getIo();
 
@@ -115,31 +160,21 @@ const registerHandlers = () => {
         });
       }
 
+      // They wrote to us, so the number is clearly on WhatsApp.
+      contactRepository.clearInvalid(from).catch(() => {});
+
+      // STOP / START (and Meta's "Stop promotions" button) take priority and
+      // replace the auto-reply with a confirmation.
+      const keyword = detectConsentKeyword(body, payload.buttonText, payload.buttonPayload);
+      if (keyword) {
+        await handleConsentKeyword(keyword, from, contact.name);
+        return;
+      }
+
       try {
-        const settings = await settingsRepository.findAll();
-        const config = {};
-        (settings || []).forEach((s) => {
-          config[s.key] = s.value;
-        });
-
-        const autoReplyEnabled = String(config.autoReplyEnabled) === "true";
-        if (autoReplyEnabled) {
-          const autoReplyMessage = config.autoReplyMessage || "Thank you for reaching out! We have received your message.";
-
-          logger.info(`Queuing auto-reply job to ${from}`);
-          await jobRepository.create({
-            campaign_id: null,
-            phone: from,
-            type: "text",
-            message: autoReplyMessage,
-            status: "pending",
-            attempts: 0,
-            max_attempts: 3,
-            run_at: new Date(Date.now() + 1000).toISOString(),
-          });
-        }
+        await queueAutoReply(from);
       } catch (settingErr) {
-        logger.error("Auto-reply settings lookup failed", { error: settingErr });
+        logger.error("Auto-reply could not be queued", { error: settingErr });
       }
     } catch (err) {
       logger.error("Error in IncomingMessageEvent handler:", { error: err });
@@ -164,83 +199,35 @@ const registerHandlers = () => {
       if (errorCategory) updateData.error_category = errorCategory;
 
       const updated = await messageRepository.updateByMessageId(messageSid, updateData);
+      if (!updated) return;
 
-      if (updated) {
-        logger.info(`Updated message ${messageSid} status to: ${status}`);
+      logger.info(`Updated message ${messageSid} status to: ${status}`);
 
-        const conversation = await conversationRepository.findByPhone(phone);
-        if (conversation) {
-          await conversationRepository.updateLastStatus(phone, status);
-        }
+      const conversation = await conversationRepository.findByPhone(phone);
+      if (conversation) {
+        await conversationRepository.updateLastStatus(phone, status);
+      }
 
-        if (io) {
-          io.emit("status_update", {
-            messageId: messageSid,
-            phone,
-            status,
-            errorDetails: updated.error_details,
-          });
-        }
+      if (io) {
+        io.emit("status_update", {
+          messageId: messageSid,
+          phone,
+          status,
+          errorDetails: updated.error_details,
+        });
+      }
 
-        if (updated.campaign_id) {
-          try {
-            const campaignId = updated.campaign_id;
-            const counts = await jobRepository.getCountsByCampaignId(campaignId);
-            const { deliveredCount, readCount } = await messageRepository.countDeliveredAndRead(campaignId);
+      // Most WhatsApp delivery failures arrive here, after the send succeeded.
+      if (FAILURE_STATUSES.has(status)) {
+        if (errorCategory === "invalid_phone") await contactRepository.markInvalid(phone, errorDetails);
+        if (errorCategory === "opt_out") await contactRepository.setOptOut(phone, { reason: "provider_opt_out", source: "provider_error" });
+        if (updated.campaign_id) await onCampaignFailure(updated.campaign_id, errorCategory);
+      } else if (status === "delivered") {
+        contactRepository.clearInvalid(phone).catch(() => {});
+      }
 
-            // Account for recipients that failed pre-flight validation and
-            // never became job rows, so their failures are not overwritten.
-            let campaign = null;
-            try { campaign = await campaignRepository.findById(campaignId); } catch (e) { /* ignore */ }
-            const totalContacts = (campaign && campaign.total_contacts) || counts.total;
-            const preflightFailed = Math.max(0, totalContacts - counts.total);
-
-            const processedJobs = counts.completed + counts.failed;
-            const totalFailed = counts.failed + preflightFailed;
-            const allProcessed = counts.total === 0 ? true : processedJobs >= counts.total;
-            const campaignStatus = allProcessed ? "completed" : "running";
-
-            await campaignRepository.update(campaignId, {
-              sent_count: counts.completed,
-              failed_count: totalFailed,
-              delivered_count: deliveredCount,
-              read_count: readCount,
-              status: campaignStatus,
-            });
-
-            const processedIncludingPreflight = processedJobs + preflightFailed;
-            const progressPercent = totalContacts > 0 ? Math.round((processedIncludingPreflight / totalContacts) * 100) : 0;
-
-            if (io) {
-              if (allProcessed) {
-                io.emit("campaign_complete", {
-                  campaignId,
-                  sentCount: counts.completed,
-                  failedCount: totalFailed,
-                  total: totalContacts,
-                });
-              } else {
-                io.emit("campaign_progress", {
-                  campaignId,
-                  phone,
-                  status,
-                  progress: progressPercent,
-                });
-              }
-
-              io.emit("campaign_update", {
-                campaignId,
-                sentCount: counts.completed,
-                failedCount: totalFailed,
-                deliveredCount: deliveredCount,
-                readCount: readCount,
-                status: campaignStatus,
-              });
-            }
-          } catch (campaignErr) {
-            logger.error("Failed to recalculate campaign counts from status callback:", { campaignId: updated.campaign_id, error: campaignErr });
-          }
-        }
+      if (updated.campaign_id) {
+        await refreshCampaignProgress(updated.campaign_id, { phone, status });
       }
     } catch (err) {
       logger.error("Error in MessageStatusEvent handler:", { error: err });
@@ -248,4 +235,4 @@ const registerHandlers = () => {
   });
 };
 
-module.exports = { registerHandlers, isStatusRegression };
+module.exports = { registerHandlers, isStatusRegression, shouldAutoReply };
