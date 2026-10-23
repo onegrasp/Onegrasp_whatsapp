@@ -67,6 +67,30 @@ test("drafts and rejected templates are blocked; unknown names are left to Twili
   });
 });
 
+test("an image can't be sent with a template that has no image header (Twilio 63021)", async () => {
+  const textWithButtons = { id: "t7", name: "mahendra_test_name_", type: "interactive", status: "approved", content_sid: "HX7" };
+  await withStubs(byName(textWithButtons), async () => {
+    const withImage = await templateService.checkSendable("mahendra_test_name_", { mediaUrl: "https://x/magazine.png" });
+    assert.strictEqual(withImage.ok, false);
+    assert.match(withImage.message, /has no image/);
+    assert.strictEqual((await templateService.checkSendable("mahendra_test_name_")).ok, true);
+  });
+  const mediaTemplate = { id: "t8", name: "magazine", type: "media", header_image_url: "https://x/m.png", status: "approved", content_sid: "HX8" };
+  await withStubs(byName(mediaTemplate), async () => {
+    assert.strictEqual((await templateService.checkSendable("magazine", { mediaUrl: "https://x/m.png" })).ok, true);
+  });
+});
+
+test("templates can't mix quick replies with link/call buttons", () => {
+  const { validateButtons } = templateService;
+  assert.throws(() => validateButtons([{ type: "URL" }, { type: "phone" }, { type: "reply" }]), /not both/);
+  assert.throws(() => validateButtons([{ type: "URL" }, { type: "URL" }, { type: "URL" }]), /at most 2 link/);
+  assert.throws(() => validateButtons([{ type: "phone" }, { type: "phone" }]), /only 1 call/);
+  assert.doesNotThrow(() => validateButtons([{ type: "URL" }, { type: "phone" }]));
+  assert.doesNotThrow(() => validateButtons([{ type: "reply" }, { type: "reply" }, { type: "reply" }]));
+  assert.doesNotThrow(() => validateButtons([]));
+});
+
 test("if Twilio can't be reached, the stored status is kept (never downgraded)", async () => {
   await withStubs(
     [

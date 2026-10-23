@@ -32,11 +32,12 @@ const consentMissing = (analysis) =>
  */
 const campaignPreflight = async (req, res, next) => {
   try {
-    const { phones = [], type = "template", templateName, skipRecentDays, requireConsent = false, scheduledAt = null } = req.body || {};
+    const { phones = [], type = "template", templateName, mediaUrl = "", skipRecentDays, requireConsent = false, scheduledAt = null } = req.body || {};
     if (!Array.isArray(phones)) return res.status(400).json({ error: "phones must be an array" });
 
-    // A template WhatsApp hasn't approved will be rejected for every recipient.
-    const templateCheck = type === "template" && templateName ? await templateService.checkSendable(templateName) : { ok: true };
+    // A template WhatsApp hasn't approved, or an image added to a template
+    // without one, is rejected for every recipient.
+    const templateCheck = type === "template" && templateName ? await templateService.checkSendable(templateName, { mediaUrl }) : { ok: true };
 
     const safeguards = await getSafeguards();
     const cooldownDays = resolveCooldown(skipRecentDays, safeguards);
@@ -162,7 +163,7 @@ const sendBulk = async (req, res) => {
 
   if (type === "template" && templateName) {
     try {
-      const templateCheck = await templateService.checkSendable(templateName);
+      const templateCheck = await templateService.checkSendable(templateName, { mediaUrl });
       if (!templateCheck.ok) return res.status(400).json({ error: templateCheck.message, templateStatus: templateCheck.status });
     } catch (checkErr) {
       logger.warn("Could not verify template approval before sending:", { error: checkErr.message });

@@ -28,6 +28,9 @@ const getTemplateVariables = (tpl) => {
 const findTemplate = (templates, key) =>
   templates.find((t) => t.content_sid === key || t.name === key || (t._id || t.id) === key);
 
+// Only templates created with an image header can be sent with an image.
+const templateHasImage = (tpl) => Boolean(tpl && (tpl.type === "media" || tpl.header_image_url || tpl.headerImageUrl));
+
 const isOptedOut = (c) => c.isActive === false || c.consentStatus === "opted_out";
 const hasConsent = (c) => c.consentStatus === "opted_in";
 
@@ -477,6 +480,7 @@ export default function BulkSender() {
       const res = await campaignPreflight({
         phones: payload.phones,
         templateName: payload.templateName,
+        mediaUrl: payload.mediaUrl,
         type: payload.type,
         skipRecentDays: payload.skipRecentDays,
         requireConsent: payload.requireConsent,
@@ -719,7 +723,13 @@ export default function BulkSender() {
               <SegmentedControl
                 label="Message type"
                 value={msgType}
-                onChange={setMsgType}
+                onChange={(type) => {
+                  setMsgType(type);
+                  // Don't carry an image across: a template only keeps its own.
+                  const tpl = type === "template" ? findTemplate(templates, selectedTemplate) : null;
+                  setCampaignMedia(null);
+                  setCampaignMediaUrl(tpl ? tpl.header_image_url || tpl.headerImageUrl || "" : "");
+                }}
                 options={[
                   { value: "template", label: "Template" },
                   { value: "text", label: "Free text" },
@@ -745,9 +755,10 @@ export default function BulkSender() {
                           const val = e.target.value;
                           setSelectedTemplate(val);
                           const tpl = findTemplate(templates, val);
-                          if (tpl && (tpl.header_image_url || tpl.headerImageUrl)) {
-                            setCampaignMediaUrl(tpl.header_image_url || tpl.headerImageUrl);
-                          }
+                          // Use the template's own image, or none: an image can't be
+                          // added to a template that doesn't have one.
+                          setCampaignMedia(null);
+                          setCampaignMediaUrl(tpl ? tpl.header_image_url || tpl.headerImageUrl || "" : "");
                         }}
                       >
                         <option value="">Select a template</option>
@@ -854,6 +865,12 @@ export default function BulkSender() {
               </div>
             )}
 
+            {msgType === "template" && selectedTpl && !templateHasImage(selectedTpl) ? (
+              <p className="rounded-md bg-gray-50 px-3 py-2 text-13 text-gray-600">
+                This template has no image, so one can't be added. WhatsApp sends templates exactly as approved. To send an image, create a
+                template with <strong className="font-medium text-gray-800">Type: Media (image)</strong> on the Templates page.
+              </p>
+            ) : (msgType === "text" || selectedTpl || templates.length === 0) && (
             <div>
               <span className="label">{msgType === "template" ? "Header image" : "Image (optional)"}</span>
               {campaignMediaUrl ? (
@@ -885,6 +902,7 @@ export default function BulkSender() {
               )}
               <input ref={mediaInputRef} type="file" accept="image/*" onChange={handleMediaUpload} className="sr-only" />
             </div>
+            )}
 
             <div>
               <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-700">

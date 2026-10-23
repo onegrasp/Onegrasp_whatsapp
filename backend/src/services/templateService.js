@@ -27,9 +27,33 @@ function getSampleValue(varName) {
   return varName;
 }
 
+// WhatsApp template button rules. Twilio's call-to-action type only takes
+// link and call buttons, and its quick-reply type only takes replies, so the
+// two kinds can't be mixed in one template.
+const validateButtons = (buttons = []) => {
+  const list = Array.isArray(buttons) ? buttons : [];
+  const links = list.filter((b) => b.type === "URL").length;
+  const calls = list.filter((b) => b.type === "phone").length;
+  const replies = list.length - links - calls;
+  if (replies > 0 && links + calls > 0) {
+    throw new AppError(
+      "A template can have quick-reply buttons or link/call buttons, but not both. Remove the Reply button, or remove the link and call buttons.",
+      400,
+      "validation_error"
+    );
+  }
+  if (links > 2) throw new AppError("A template can have at most 2 link buttons.", 400, "validation_error");
+  if (calls > 1) throw new AppError("A template can have only 1 call button.", 400, "validation_error");
+  if (replies > 3) throw new AppError("A template can have at most 3 quick-reply buttons.", 400, "validation_error");
+};
+
+// Does this template have an image header? Only those can be sent with an image.
+const templateHasImage = (tpl) => Boolean(tpl && (tpl.type === "media" || tpl.header_image_url));
+
 const templateService = {
   async createTemplate(templateData) {
     const { name, body, type = "text", category = "UTILITY", language = "en", buttons = [], headerImageUrl } = templateData;
+    validateButtons(buttons);
 
     const existing = await templateRepository.findByName(name);
     if (existing) {
@@ -78,6 +102,8 @@ const templateService = {
       throw new AppError("Template not found", 404, "template_not_found");
     }
 
+    if (updateData.buttons) validateButtons(updateData.buttons);
+
     if (updateData.body) {
       updateData.variables = extractVariables(updateData.body);
     }
@@ -121,6 +147,8 @@ const templateService = {
     if (!template) {
       throw new AppError("Template not found", 404, "template_not_found");
     }
+    // Catch drafts saved before the button rules existed.
+    validateButtons(template.buttons);
 
     const client = await getTwilioClient();
 
@@ -308,11 +336,23 @@ const templateService = {
    * pending is re-checked live first, so a fresh approval isn't missed.
    * Unknown names are allowed through (Twilio has the final say).
    */
-  async checkSendable(templateNameOrSid) {
+  async checkSendable(templateNameOrSid, { mediaUrl = "" } = {}) {
     if (!templateNameOrSid) return { ok: true };
     let tpl = await templateRepository.findByName(templateNameOrSid);
     if (!tpl) tpl = await templateRepository.findByContentSid(templateNameOrSid);
     if (!tpl) tpl = await templateRepository.findById(templateNameOrSid).catch(() => null);
+
+    // WhatsApp delivers a template exactly as approved: an image can't be added
+    // to a template that has no image header (Twilio rejects it, error 63021).
+    if (tpl && mediaUrl && !templateHasImage(tpl)) {
+      return {
+        ok: false,
+        status: tpl.status,
+        template: tpl,
+        message: `Template "${tpl.name}" has no image, so an image can't be sent with it. Remove the image, or use a template created with Type: Media (image).`,
+      };
+    }
+
     if (!tpl || tpl.status === "approved") return { ok: true, template: tpl };
 
     let status = tpl.status;
@@ -376,12 +416,23 @@ const templateService = {
       } else if (typesObj["twilio/list-picker"]) {
         parsedType = typesObj["twilio/list-picker"];
         type = "interactive";
+      } else if (typesObj["whatsapp/card"] || typesObj["twilio/card"]) {
+        parsedType = typesObj["whatsapp/card"] || typesObj["twilio/card"];
+        type = "interactive";
       } else {
         const keys = Object.keys(typesObj);
         if (keys.length > 0) {
           parsedType = typesObj[keys[0]];
           type = keys[0].includes("text") ? "text" : "interactive";
         }
+      }
+
+      // Templates with an image header (media or card types) keep that image,
+      // so Bulk send knows an image may be sent with them.
+      let headerImageUrl = "";
+      if (parsedType && Array.isArray(parsedType.media) && parsedType.media.length > 0) {
+        headerImageUrl = parsedType.media[0];
+        type = "media";
       }
 
       if (parsedType) {
@@ -409,6 +460,7 @@ const templateService = {
           rejection_reason: rejectionReason,
           buttons,
           variables,
+          ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
           updated_at: new Date().toISOString(),
         };
         // Only overwrite name if Twilio actually has a friendlyName
@@ -430,6 +482,7 @@ const templateService = {
             rejection_reason: rejectionReason,
             buttons,
             variables,
+            ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
             updated_at: new Date().toISOString(),
           });
           updatedCount++;
@@ -445,6 +498,7 @@ const templateService = {
             rejection_reason: rejectionReason,
             buttons,
             variables,
+            ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
             version: 1,
           });
           createdCount++;
@@ -463,3 +517,5 @@ const templateService = {
 };
 
 module.exports = templateService;
+module.exports.validateButtons = validateButtons;
+module.exports.templateHasImage = templateHasImage;

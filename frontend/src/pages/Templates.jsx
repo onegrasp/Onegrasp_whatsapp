@@ -266,6 +266,15 @@ export default function Templates() {
     setEditingTemplate(null);
   };
 
+  // WhatsApp rules: quick replies OR link/call buttons (not both), at most 2
+  // links and 1 call button.
+  const buttonCounts = {
+    links: buttons.filter((b) => b.type === "URL").length,
+    calls: buttons.filter((b) => b.type === "phone").length,
+    replies: buttons.filter((b) => b.type !== "URL" && b.type !== "phone").length,
+  };
+  const buttonsMixed = buttonCounts.replies > 0 && buttonCounts.links + buttonCounts.calls > 0;
+
   const handleAddButton = (type) => {
     if (buttons.length >= 3) return;
     setButtons([
@@ -303,6 +312,10 @@ export default function Templates() {
     e.preventDefault();
     if (!name || !body) {
       setFormError("Add a template name and message body.");
+      return;
+    }
+    if (buttonsMixed) {
+      setFormError("Use either quick-reply buttons or link/call buttons, not both.");
       return;
     }
     try {
@@ -618,6 +631,10 @@ export default function Templates() {
                 )}
               </Field>
             </div>
+            <p className="-mt-3 text-xs text-gray-500">
+              Invitations and offers belong in <strong className="font-medium text-gray-700">Marketing</strong>; Meta rejects or re-labels Utility
+              templates with promotional content. To send an image, choose <strong className="font-medium text-gray-700">Media (image)</strong>.
+            </p>
 
             {templateType === "media" && (
               <div>
@@ -691,18 +708,24 @@ export default function Templates() {
                 </span>
                 {!isFormLocked && (
                   <div className="flex gap-1.5">
-                    <button type="button" className="btn btn-secondary btn-sm" disabled={buttons.length >= 3} onClick={() => handleAddButton("URL")}>
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={buttons.length >= 3 || buttonCounts.replies > 0 || buttonCounts.links >= 2} onClick={() => handleAddButton("URL")}>
                       + Link
                     </button>
-                    <button type="button" className="btn btn-secondary btn-sm" disabled={buttons.length >= 3} onClick={() => handleAddButton("phone")}>
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={buttons.length >= 3 || buttonCounts.replies > 0 || buttonCounts.calls >= 1} onClick={() => handleAddButton("phone")}>
                       + Call
                     </button>
-                    <button type="button" className="btn btn-secondary btn-sm" disabled={buttons.length >= 3} onClick={() => handleAddButton("reply")}>
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={buttons.length >= 3 || buttonCounts.links + buttonCounts.calls > 0} onClick={() => handleAddButton("reply")}>
                       + Quick reply
                     </button>
                   </div>
                 )}
               </div>
+              <p className="mb-2 text-xs text-gray-500">Use either quick replies (up to 3) or link and call buttons (up to 2 links and 1 call), not both.</p>
+              {buttonsMixed && (
+                <p className="mb-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                  This template mixes quick replies with link/call buttons, which WhatsApp templates don't allow. Remove one kind before saving.
+                </p>
+              )}
               {buttons.length === 0 ? (
                 <p className="text-13 text-gray-500">No buttons.</p>
               ) : (
