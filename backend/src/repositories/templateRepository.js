@@ -100,16 +100,50 @@ const templateRepository = {
     return data;
   },
 
+  // Soft delete. The name is changed too, because `templates.name` is unique:
+  // otherwise a deleted template keeps its name reserved and re-creating or
+  // syncing a template with that name fails.
   async delete(id) {
+    const { data: row } = await supabase.from("templates").select("id, name").eq("id", id).maybeSingle();
+    const update = { deleted_at: new Date().toISOString() };
+    if (row && row.name && !row.name.includes("__deleted_")) update.name = `${row.name}__deleted_${row.id.slice(0, 8)}`;
+
     const { data, error } = await supabase
       .from("templates")
-      .update({ deleted_at: new Date().toISOString() })
+      .update(update)
       .eq("id", id)
       .select()
       .maybeSingle();
     if (error) throw error;
     return data;
-  }
+  },
+
+  // Frees a name still held by templates deleted before deletes renamed them.
+  async releaseDeletedName(name) {
+    if (!name) return;
+    const { data: rows, error } = await supabase
+      .from("templates")
+      .select("id, name")
+      .eq("name", name)
+      .not("deleted_at", "is", null);
+    if (error) throw error;
+    for (const row of rows || []) {
+      await supabase.from("templates").update({ name: `${row.name}__deleted_${row.id.slice(0, 8)}` }).eq("id", row.id);
+    }
+  },
+
+  // Another active template already using this name (ignoring `exceptId`)?
+  async nameTakenByOther(name, exceptId) {
+    const { data, error } = await supabase
+      .from("templates")
+      .select("id")
+      .eq("name", name)
+      .is("deleted_at", null)
+      .neq("id", exceptId)
+      .limit(1);
+    if (error) throw error;
+    return Boolean(data && data.length);
+  },
 };
 
 module.exports = templateRepository;

@@ -32,7 +32,7 @@ A self-hosted WhatsApp bulk messaging system that sends via **Twilio** and/or th
 ## Prerequisites
 
 1. **Node.js** v18+
-2. **Supabase** project (run the SQL in `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`, `backend/migrations/004_message_media.sql`, `backend/migrations/005_sending_safeguards.sql` and `backend/migrations/006_quiet_hours_override.sql`)
+2. **Supabase** project (run the SQL in `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`, `backend/migrations/004_message_media.sql`, `backend/migrations/005_sending_safeguards.sql`, `backend/migrations/006_quiet_hours_override.sql` and `backend/migrations/007_security_hardening.sql`)
 3. A WhatsApp sender: a **Twilio** account with WhatsApp enabled, and/or a **Meta Developer Account** with a WhatsApp Business App
 
 ---
@@ -218,7 +218,7 @@ Jane Smith,1,4155238886
 ### Database (Supabase)
 
 1. Create a Supabase project
-2. Run `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`, `backend/migrations/004_message_media.sql`, `backend/migrations/005_sending_safeguards.sql` and `backend/migrations/006_quiet_hours_override.sql` in the SQL editor
+2. Run `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`, `backend/migrations/004_message_media.sql`, `backend/migrations/005_sending_safeguards.sql`, `backend/migrations/006_quiet_hours_override.sql` and `backend/migrations/007_security_hardening.sql` in the SQL editor
 3. Copy the project URL to `SUPABASE_URL` and the **service role** key to `SUPABASE_KEY` (server-side only — never ship it to the browser)
 
 ### Background worker & serverless note

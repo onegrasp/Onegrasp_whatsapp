@@ -57,8 +57,10 @@ const templateService = {
 
     const existing = await templateRepository.findByName(name);
     if (existing) {
-      throw new AppError(`Template with name '${name}' already exists.`, 400, "duplicate_template");
+      throw new AppError(`A template named "${name}" already exists. Choose a different name.`, 400, "duplicate_template");
     }
+    // A deleted template may still hold this name in the database.
+    await templateRepository.releaseDeletedName(name);
 
     const variables = extractVariables(body);
 
@@ -103,6 +105,13 @@ const templateService = {
     }
 
     if (updateData.buttons) validateButtons(updateData.buttons);
+
+    if (updateData.name && updateData.name !== template.name) {
+      if (await templateRepository.nameTakenByOther(updateData.name, id)) {
+        throw new AppError(`A template named "${updateData.name}" already exists. Choose a different name.`, 400, "duplicate_template");
+      }
+      await templateRepository.releaseDeletedName(updateData.name);
+    }
 
     if (updateData.body) {
       updateData.variables = extractVariables(updateData.body);
@@ -389,6 +398,7 @@ const templateService = {
 
     let createdCount = 0;
     let updatedCount = 0;
+    const skipped = [];
 
     for (const t of (twilioTemplates || [])) {
       const approvalReq = t.approvalRequests || {};
@@ -450,31 +460,11 @@ const templateService = {
       const variables = extractVariables(body);
       const templateName = t.friendlyName || null;
 
-      const existing = await templateRepository.findByContentSid(t.sid);
-      if (existing) {
-        const updatePayload = {
-          body,
-          type,
-          language: t.language || "en",
-          status,
-          rejection_reason: rejectionReason,
-          buttons,
-          variables,
-          ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
-          updated_at: new Date().toISOString(),
-        };
-        // Only overwrite name if Twilio actually has a friendlyName
-        if (templateName) {
-          updatePayload.name = templateName;
-        }
-        await templateRepository.update(existing.id, updatePayload);
-        updatedCount++;
-      } else {
-        const safeName = templateName || t.sid;
-        const nameExisting = templateName ? await templateRepository.findByName(templateName) : null;
-        if (nameExisting) {
-          await templateRepository.update(nameExisting.id, {
-            content_sid: t.sid,
+      // One bad template must not stop the rest from syncing.
+      try {
+        const existing = await templateRepository.findByContentSid(t.sid);
+        if (existing) {
+          const updatePayload = {
             body,
             type,
             language: t.language || "en",
@@ -484,33 +474,69 @@ const templateService = {
             variables,
             ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
             updated_at: new Date().toISOString(),
-          });
+          };
+          // Take Twilio's name unless another template here already uses it.
+          if (templateName && templateName !== existing.name) {
+            await templateRepository.releaseDeletedName(templateName);
+            if (!(await templateRepository.nameTakenByOther(templateName, existing.id))) {
+              updatePayload.name = templateName;
+            }
+          }
+          await templateRepository.update(existing.id, updatePayload);
           updatedCount++;
         } else {
-          await templateRepository.create({
-            name: safeName,
-            content_sid: t.sid,
-            body,
-            type,
-            category: "UTILITY",
-            language: t.language || "en",
-            status,
-            rejection_reason: rejectionReason,
-            buttons,
-            variables,
-            ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
-            version: 1,
-          });
-          createdCount++;
+          const nameExisting = templateName ? await templateRepository.findByName(templateName) : null;
+          // Same name, but already linked to a different Twilio template (e.g. an
+          // older submission): keep both instead of overwriting the link.
+          const linkedElsewhere = Boolean(nameExisting && nameExisting.content_sid && nameExisting.content_sid !== t.sid);
+          if (nameExisting && !linkedElsewhere) {
+            await templateRepository.update(nameExisting.id, {
+              content_sid: t.sid,
+              body,
+              type,
+              language: t.language || "en",
+              status,
+              rejection_reason: rejectionReason,
+              buttons,
+              variables,
+              ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
+              updated_at: new Date().toISOString(),
+            });
+            updatedCount++;
+          } else {
+            const safeName = !templateName ? t.sid : linkedElsewhere ? `${templateName}_${t.sid.slice(-6)}` : templateName;
+            await templateRepository.releaseDeletedName(safeName);
+            await templateRepository.create({
+              name: safeName,
+              content_sid: t.sid,
+              body,
+              type,
+              category: "UTILITY",
+              language: t.language || "en",
+              status,
+              rejection_reason: rejectionReason,
+              buttons,
+              variables,
+              ...(headerImageUrl ? { header_image_url: headerImageUrl } : {}),
+              version: 1,
+            });
+            createdCount++;
+          }
         }
+      } catch (err) {
+        logger.warn(`Skipped template "${templateName || t.sid}" during sync`, { error: err.message });
+        skipped.push(templateName || t.sid);
       }
     }
 
-    logger.info(`Synced ${twilioTemplates.length} templates from Twilio Content API. Created: ${createdCount}, Updated: ${updatedCount}`);
+    logger.info(`Synced ${twilioTemplates.length} templates from Twilio Content API. Created: ${createdCount}, Updated: ${updatedCount}, Skipped: ${skipped.length}`);
     return {
-      message: `Successfully synced ${twilioTemplates.length} templates from Twilio.`,
+      message: skipped.length
+        ? `Synced ${twilioTemplates.length - skipped.length} of ${twilioTemplates.length} templates from Twilio. Couldn't sync: ${skipped.join(", ")}.`
+        : `Successfully synced ${twilioTemplates.length} templates from Twilio.`,
       created: createdCount,
       updated: updatedCount,
+      skipped,
       total: twilioTemplates.length,
     };
   },

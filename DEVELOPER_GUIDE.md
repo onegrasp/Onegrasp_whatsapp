@@ -262,7 +262,12 @@ if you set up a fresh database, run `supabase_schema.sql`, then `migrations.sql`
 `migrations/003_enable_rls.sql`, then `migrations/004_message_media.sql` (stores sent images on
 `messages.media_url` so they show in Chats), then `migrations/005_sending_safeguards.sql` (contact
 consent and "not on WhatsApp" flags, campaign pause reasons, and two SQL helpers for the daily-limit
-and cooldown checks).
+and cooldown checks), then `migrations/006_quiet_hours_override.sql`, then
+`migrations/007_security_hardening.sql` (pins the SQL functions' `search_path`, stops the public API
+keys calling them, and indexes `conversations.last_message_id`).
+
+With RLS on, `SUPABASE_KEY` must be the **service_role / secret** key. The backend logs a warning
+at startup if it's the anon / publishable key.
 
 ### Sending safeguards (protecting the number's quality rating)
 - **Opt-outs:** an incoming STOP / UNSUBSCRIBE (or Meta's "Stop promotions" button) adds the number to
@@ -355,7 +360,7 @@ npm run dev                 # starts on http://localhost:5173
 - The frontend dev server proxies `/api` to `http://localhost:5000` (see `vite.config.js`).
 - For webhooks locally, expose the backend with a tunnel (e.g. `npx ngrok http 5000`) and point
   Twilio/Meta at the public URL.
-- Database: run `supabase_schema.sql`, `migrations.sql`, `migrations/003_enable_rls.sql` and `migrations/004_message_media.sql` in the Supabase SQL editor first.
+- Database: run `supabase_schema.sql`, `migrations.sql`, then `migrations/003` to `migrations/007` in order, in the Supabase SQL editor first.
 
 ---
 

@@ -385,7 +385,9 @@ export default function Templates() {
     try {
       setSyncingAll(true);
       const res = await syncAllTemplates();
-      toast.success(`Sync complete: ${res.data?.created || 0} imported, ${res.data?.updated || 0} updated.`);
+      const skipped = res.data?.skipped || [];
+      if (skipped.length) toast.error(res.data.message);
+      else toast.success(`Sync complete: ${res.data?.created || 0} imported, ${res.data?.updated || 0} updated.`);
       fetchTemplatesList();
     } catch (err) {
       toast.error(errorMessage(err, "Could not sync templates from Twilio."));
