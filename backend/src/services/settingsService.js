@@ -19,9 +19,16 @@ const SAFEGUARD_DEFAULTS = {
   // Send the auto-reply at most once per contact in this many hours, and not
   // while an agent is already talking to them. 0 = no cooldown.
   autoReplyCooldownHours: 12,
+  // Delete messages (and inactive conversations) older than this many days.
+  // 0 keeps them forever. See services/retentionService.js.
+  messageRetentionDays: 60,
 };
 
-const NUMERIC_FIELDS = new Set(["dailyConversationLimit", "campaignCooldownDays", "autoReplyCooldownHours"]);
+const NUMERIC_FIELDS = new Set(["dailyConversationLimit", "campaignCooldownDays", "autoReplyCooldownHours", "messageRetentionDays"]);
+
+// Shorter retention would break checks that look back in time (campaign
+// cooldown, daily limit, opt-out replies).
+const MIN_RETENTION_DAYS = 30;
 
 const SAFEGUARD_CACHE_MS = 15000;
 let safeguardCache = null;
@@ -116,6 +123,7 @@ const settingsService = {
         val = Number.isFinite(rate) && rate > 0 ? Math.min(rate, 10) : 2;
       }
       if (NUMERIC_FIELDS.has(field)) val = toNonNegativeNumber(val, SAFEGUARD_DEFAULTS[field]);
+      if (field === "messageRetentionDays" && val > 0) val = Math.max(MIN_RETENTION_DAYS, Math.round(val));
       if (field === "quietHoursEnabled") val = val === true || val === "true";
       if (field === "twilioAuthToken" && val === MASKED_TOKEN) continue;
       if (field === "validateWebhookSignature" && env.IS_PRODUCTION) continue;
@@ -131,3 +139,4 @@ const settingsService = {
 };
 
 module.exports = settingsService;
+module.exports.MIN_RETENTION_DAYS = MIN_RETENTION_DAYS;

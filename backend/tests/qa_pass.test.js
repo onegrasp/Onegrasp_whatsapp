@@ -86,16 +86,20 @@ test("a campaign never messages the same number twice", async () => {
 
 test("bookkeeping errors after a send don't trigger a retry", async () => {
   let retries = 0;
+  let refreshed = 0;
   await withStubs(
     [
       [campaignWorker, "process", async () => ({ messageSid: "SM1" })],
       [jobRepository, "update", async () => { throw new Error("database down"); }],
-      [campaignProgress, "refreshCampaignProgress", async () => { throw new Error("database down"); }],
+      [campaignProgress, "refreshCampaignProgress", async () => { refreshed++; throw new Error("database down"); }],
       [retryWorker, "scheduleRetry", async () => { retries++; return { type: "rescheduled" }; }],
+      // A non-paused campaign outside quiet hours, so the job is admitted.
+      [require("../src/repositories/campaignRepository"), "findById", async () => ({ id: "camp-1", status: "running", ignore_quiet_hours: true })],
     ],
     async () => {
-      const sent = await queueWorker.handleJob({ ...campaignJob, campaign_id: null });
+      const sent = await queueWorker.handleJob(campaignJob);
       assert.strictEqual(sent, true);
+      assert.strictEqual(refreshed, 1);
       assert.strictEqual(retries, 0);
     }
   );
@@ -319,6 +323,83 @@ test("saved credentials are encrypted and decrypt back; a changed key reads as e
       else process.env.SETTINGS_ENCRYPTION_KEY = originalKey;
     }
   });
+});
+
+// --- Message retention (keep 60 days, then delete) ------------------------------
+
+const settingsService = require("../src/services/settingsService");
+const retentionService = require("../src/services/retentionService");
+const campaignRepository = require("../src/repositories/campaignRepository");
+
+test("messages and idle conversations older than 60 days are deleted", async () => {
+  const cutoffs = {};
+  await withStubs(
+    [
+      [settingsService, "getSafeguards", async () => ({ messageRetentionDays: 60, campaignCooldownDays: 3 })],
+      [messageRepository, "deleteOlderThan", async (cutoff) => { cutoffs.messages = cutoff; return 120; }],
+      [conversationRepository, "deleteInactiveSince", async (cutoff) => { cutoffs.conversations = cutoff; return 4; }],
+      [supabaseClient, "from", () => emptyQuery()],
+    ],
+    async () => {
+      const now = new Date("2026-10-24T00:00:00Z");
+      const result = await retentionService.purgeOldMessages(now);
+      assert.deepStrictEqual([result.days, result.messages, result.conversations], [60, 120, 4]);
+      assert.strictEqual(cutoffs.messages, "2026-08-25T00:00:00.000Z");
+      assert.strictEqual(cutoffs.conversations, cutoffs.messages);
+    }
+  );
+});
+
+test("retention can be switched off, and never goes below 30 days or the campaign cooldown", async () => {
+  assert.strictEqual(retentionService.effectiveRetentionDays({ messageRetentionDays: 0 }), 0);
+  assert.strictEqual(retentionService.effectiveRetentionDays({ messageRetentionDays: 7, campaignCooldownDays: 3 }), 30);
+  assert.strictEqual(retentionService.effectiveRetentionDays({ messageRetentionDays: 40, campaignCooldownDays: 45 }), 45);
+  let deleted = false;
+  await withStubs(
+    [
+      [settingsService, "getSafeguards", async () => ({ messageRetentionDays: 0 })],
+      [messageRepository, "deleteOlderThan", async () => { deleted = true; return 0; }],
+    ],
+    async () => {
+      await retentionService.purgeOldMessages();
+      assert.strictEqual(deleted, false);
+    }
+  );
+});
+
+test("campaign totals never drop when old jobs or messages are gone", async () => {
+  let saved;
+  await withStubs(
+    [
+      [jobRepository, "getCountsByCampaignId", async () => ({ total: 0, completed: 0, failed: 0, pending: 0, processing: 0, paused: 0, cancelled: 0 })],
+      [messageRepository, "countDeliveredAndRead", async () => ({ deliveredCount: 0, readCount: 0 })],
+      [campaignRepository, "findById", async () => ({ id: "old", status: "completed", total_contacts: 500, sent_count: 480, failed_count: 20, delivered_count: 450, read_count: 300 })],
+      [campaignRepository, "update", async (id, data) => { saved = data; return data; }],
+    ],
+    async () => {
+      await campaignProgress.refreshCampaignProgress("old");
+      assert.deepStrictEqual(
+        [saved.sent_count, saved.failed_count, saved.delivered_count, saved.read_count, saved.status],
+        [480, 20, 450, 300, "completed"]
+      );
+    }
+  );
+});
+
+test("a running campaign still counts recipients rejected before sending as failed", async () => {
+  let saved;
+  await withStubs(
+    [
+      [jobRepository, "getCountsByCampaignId", async () => ({ total: 8, completed: 5, failed: 1, pending: 2, processing: 0, paused: 0, cancelled: 0 })],
+      [messageRepository, "countDeliveredAndRead", async () => ({ deliveredCount: 4, readCount: 1 })],
+      [campaignRepository, "findById", async () => ({ id: "c", status: "running", total_contacts: 10, sent_count: 4, failed_count: 2 })],
+      [campaignRepository, "update", async (id, data) => { saved = data; return data; }],
+    ],
+    async () => {
+      await campaignProgress.refreshCampaignProgress("c");
+      assert.deepStrictEqual([saved.sent_count, saved.failed_count, saved.status], [5, 3, "running"]);
+    }
+  );
 });
 
 // --- Reading past Supabase's 1,000-row page -----------------------------------

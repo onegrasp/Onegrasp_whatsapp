@@ -245,6 +245,13 @@ const messageRepository = {
     return result;
   },
 
+  // Permanently deletes messages sent or received before `cutoffISO`.
+  async deleteOlderThan(cutoffISO) {
+    const { count, error } = await supabase.from("messages").delete({ count: "exact" }).lt("timestamp", cutoffISO);
+    if (error) throw error;
+    return count || 0;
+  },
+
   async countDeliveredAndRead(campaignId) {
     const { count: deliveredMessages } = await supabase
       .from("messages")

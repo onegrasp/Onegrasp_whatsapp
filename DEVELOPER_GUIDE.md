@@ -312,6 +312,11 @@ at startup if it's the anon / publishable key.
 - **Uploaded media** has to stay publicly downloadable (WhatsApp fetches it from the link), so files
   get random 128-bit names instead.
 - **Webhook signatures** are always verified in production.
+- **Data retention:** messages older than `messageRetentionDays` (Settings → Data, default 60) are
+  deleted permanently, with conversations that have had no activity since
+  (`services/retentionService.js`, run on start-up and every 12 hours). Contacts, campaigns and their
+  totals, templates and the audit log are kept. Minimum 30 days (and never less than the campaign
+  cooldown); 0 keeps everything. Campaign totals never go down when old records are removed.
 
 ---
 

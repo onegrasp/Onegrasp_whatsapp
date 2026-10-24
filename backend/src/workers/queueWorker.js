@@ -5,7 +5,8 @@ const campaignWorker = require("./campaignWorker");
 const retryWorker = require("./retryWorker");
 const statusSyncWorker = require("./statusSyncWorker");
 const templateApprovalWorker = require("./templateApprovalWorker");
-const { refreshCampaignProgress } = require("../services/campaignProgress");
+const campaignProgress = require("../services/campaignProgress");
+const retentionService = require("../services/retentionService");
 const { getSafeguards, quietHoursOptions, hasQuietHoursOverride } = require("../services/sendingPolicy");
 const { quietHoursEnd } = require("../utils/quietHours");
 const logger = require("../utils/logger");
@@ -24,6 +25,15 @@ const cleanupOldJobs = async () => {
     }
   } catch (err) {
     logger.error("Failed to run jobs table cleanup policy:", { error: err });
+  }
+};
+
+// Deletes messages past the retention period (Settings, default 60 days).
+const purgeOldMessages = async () => {
+  try {
+    await retentionService.purgeOldMessages();
+  } catch (err) {
+    logger.error("Message retention run failed", { error: err.message });
   }
 };
 
@@ -88,7 +98,7 @@ const handleJob = async (job) => {
   } catch (err) {
     const result = await retryWorker.scheduleRetry(job, err);
     if (result.type === "permanent_fail") {
-      await refreshCampaignProgress(job.campaign_id, { phone: job.phone, status: "failed" }).catch((e) =>
+      await campaignProgress.refreshCampaignProgress(job.campaign_id, { phone: job.phone, status: "failed" }).catch((e) =>
         logger.error("Could not refresh campaign progress", { error: e.message })
       );
     }
@@ -103,7 +113,7 @@ const handleJob = async (job) => {
     logger.error(`Job ${job.id} was sent but couldn't be marked completed`, { error: err.message });
   }
   try {
-    await refreshCampaignProgress(job.campaign_id, { phone: job.phone, status: "sent" });
+    await campaignProgress.refreshCampaignProgress(job.campaign_id, { phone: job.phone, status: "sent" });
   } catch (err) {
     logger.error("Could not refresh campaign progress", { error: err.message });
   }
@@ -117,8 +127,10 @@ const start = () => {
   processQueue();
 
   cleanupOldJobs();
+  purgeOldMessages();
   recoverStaleJobs();
   timers.push(setInterval(cleanupOldJobs, 12 * 60 * 60 * 1000));
+  timers.push(setInterval(purgeOldMessages, 12 * 60 * 60 * 1000));
   timers.push(setInterval(recoverStaleJobs, 5 * 60 * 1000));
   statusSyncWorker.start();
   templateApprovalWorker.start();

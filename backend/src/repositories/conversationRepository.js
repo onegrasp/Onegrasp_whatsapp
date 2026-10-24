@@ -73,7 +73,15 @@ const conversationRepository = {
       .maybeSingle();
     if (error) throw error;
     return data;
-  }
+  },
+
+  // Permanently deletes conversations with no activity since `cutoffISO`
+  // (their messages are deleted by the same retention run).
+  async deleteInactiveSince(cutoffISO) {
+    const { count, error } = await supabase.from("conversations").delete({ count: "exact" }).lt("last_timestamp", cutoffISO);
+    if (error) throw error;
+    return count || 0;
+  },
 };
 
 module.exports = conversationRepository;

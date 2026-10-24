@@ -27,8 +27,10 @@ const refreshCampaignProgress = async (campaignId, { phone = null, status = null
 
     // Recipients that failed pre-flight checks (invalid number, opted out)
     // never became jobs, so account for them explicitly.
+    // With no jobs left (cleaned up after 30 days) this can't be worked out,
+    // and the stored total is kept instead.
     const totalContacts = (campaign && campaign.total_contacts) || counts.total;
-    const preflightFailed = Math.max(0, totalContacts - counts.total);
+    const preflightFailed = counts.total > 0 ? Math.max(0, totalContacts - counts.total) : 0;
     const processedJobs = counts.completed + counts.failed;
     const totalFailed = counts.failed + preflightFailed;
     const remaining = counts.pending + counts.processing + (counts.paused || 0);
@@ -44,11 +46,15 @@ const refreshCampaignProgress = async (campaignId, { phone = null, status = null
       campaignStatus = "running";
     }
 
+    // Totals only ever grow. Old jobs (after 30 days) and messages (after the
+    // retention period) are deleted, so recomputing an old campaign — e.g. on
+    // a late read receipt — must not wipe what it achieved.
+    const keep = (fresh, stored) => Math.max(fresh || 0, stored || 0);
     await campaignRepository.update(campaignId, {
-      sent_count: counts.completed,
-      failed_count: totalFailed,
-      delivered_count: deliveredCount,
-      read_count: readCount,
+      sent_count: keep(counts.completed, campaign?.sent_count),
+      failed_count: keep(totalFailed, campaign?.failed_count),
+      delivered_count: keep(deliveredCount, campaign?.delivered_count),
+      read_count: keep(readCount, campaign?.read_count),
       status: campaignStatus,
     });
 
