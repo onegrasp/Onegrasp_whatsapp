@@ -3,6 +3,7 @@ const logger = require("../utils/logger");
 const { validateTemplateParameters } = require("../utils/templateHelper");
 const templateRepository = require("../repositories/templateRepository");
 const jobRepository = require("../repositories/jobRepository");
+const { isHttpUrl, HTTP_URL_MESSAGE } = require("../utils/url");
 const templateService = require("../services/templateService");
 const {
   analyzeRecipients,
@@ -37,6 +38,9 @@ const campaignPreflight = async (req, res, next) => {
     if (!Array.isArray(phones)) return res.status(400).json({ error: "phones must be an array" });
     if (phones.length > MAX_BULK_RECIPIENTS) {
       return res.status(400).json({ error: `A campaign can have at most ${MAX_BULK_RECIPIENTS.toLocaleString("en-US")} recipients.` });
+    }
+    if (mediaUrl && !isHttpUrl(mediaUrl)) {
+      return res.status(400).json({ error: `Image link: ${HTTP_URL_MESSAGE}` });
     }
 
     // A template WhatsApp hasn't approved, or an image added to a template
@@ -162,6 +166,9 @@ const sendBulk = async (req, res) => {
   }
   if (type === "text" && !message && !mediaUrl) {
     return res.status(400).json({ error: "Message text or an image is required" });
+  }
+  if (mediaUrl && !isHttpUrl(mediaUrl)) {
+    return res.status(400).json({ error: `Image link: ${HTTP_URL_MESSAGE}` });
   }
 
   if (type === "template" && templateName) {

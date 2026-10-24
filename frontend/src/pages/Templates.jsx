@@ -15,6 +15,7 @@ import { useConfirm, useToast } from "../components/feedback";
 import WhatsAppPreview from "../components/WhatsAppPreview";
 import { useSocket } from "../context/SocketContext";
 import { errorMessage } from "../lib/format";
+import { linkError } from "../lib/url";
 
 const extractVariables = (text) => {
   if (!text) return [];
@@ -318,6 +319,11 @@ export default function Templates() {
     }
     if (buttonsMixed) {
       setFormError("Use either quick-reply buttons or link/call buttons, not both.");
+      return;
+    }
+    const badLink = (templateType === "media" && linkError(headerImageUrl)) || buttons.some((b) => b.type === "URL" && linkError(b.url));
+    if (badLink) {
+      setFormError("Links must start with http:// or https://. Fix the highlighted fields.");
       return;
     }
     try {
@@ -654,6 +660,8 @@ export default function Templates() {
                     placeholder="https://example.com/image.jpg"
                     value={headerImageUrl}
                     onChange={(e) => setHeaderImageUrl(e.target.value)}
+                    aria-invalid={Boolean(linkError(headerImageUrl))}
+                    aria-describedby={linkError(headerImageUrl) ? "header-image-error" : undefined}
                   />
                   {!isFormLocked && (
                     <label className={`btn btn-secondary cursor-pointer ${uploadingMedia ? "pointer-events-none opacity-50" : ""}`}>
@@ -663,7 +671,11 @@ export default function Templates() {
                     </label>
                   )}
                 </div>
-                <p className="hint">{imageMeta.label ? `Detected ${imageMeta.label}. The preview uses the same shape.` : "Public image URL, or upload a PNG or JPG."}</p>
+                {linkError(headerImageUrl) ? (
+                  <p id="header-image-error" className="field-error">{linkError(headerImageUrl)}</p>
+                ) : (
+                  <p className="hint">{imageMeta.label ? `Detected ${imageMeta.label}. The preview uses the same shape.` : "Public image URL, or upload a PNG or JPG."}</p>
+                )}
               </div>
             )}
 
@@ -756,16 +768,25 @@ export default function Templates() {
                         )}
                       </div>
                       {btn.type === "URL" && (
-                        <input
-                          aria-label="Button link"
-                          type="url"
-                          required
-                          disabled={isFormLocked}
-                          className="input input-sm mt-2"
-                          placeholder="https://example.com/register"
-                          value={btn.url}
-                          onChange={(e) => updateButton(index, "url", e.target.value)}
-                        />
+                        <>
+                          <input
+                            aria-label="Button link"
+                            type="url"
+                            required
+                            disabled={isFormLocked}
+                            className="input input-sm mt-2"
+                            placeholder="https://example.com/register"
+                            value={btn.url}
+                            onChange={(e) => updateButton(index, "url", e.target.value)}
+                            aria-invalid={Boolean(linkError(btn.url))}
+                            aria-describedby={linkError(btn.url) ? `button-link-error-${index}` : undefined}
+                          />
+                          {linkError(btn.url) && (
+                            <p id={`button-link-error-${index}`} className="field-error">
+                              {linkError(btn.url)}
+                            </p>
+                          )}
+                        </>
                       )}
                       {btn.type === "phone" && (
                         <input

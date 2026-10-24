@@ -111,6 +111,30 @@ test.describe("templates", () => {
   });
 });
 
+test.describe("template links", () => {
+  test("a javascript: link is refused before saving; an https link is fine", async ({ page }) => {
+    const api = await installFakeApi(page);
+    await signIn(page);
+    await page.goto("/templates");
+    await page.getByRole("button", { name: "New template" }).first().click();
+    await page.getByLabel("Name", { exact: true }).fill("promo_link");
+    await page.getByRole("textbox", { name: "Message" }).fill("Our spring offer is live.");
+    await page.getByRole("button", { name: "+ Link" }).click();
+
+    const link = page.getByLabel("Button link");
+    await link.fill("javascript:alert(1)");
+    await expect(page.getByText("URL must start with http:// or https://").first()).toBeVisible();
+    await expect(link).toHaveAttribute("aria-invalid", "true");
+    await page.getByRole("button", { name: "Save draft" }).click();
+    await expect(page.getByText("Links must start with http:// or https://")).toBeVisible();
+    expect(api.requests.some((r) => r.method === "POST" && r.path === "/templates")).toBe(false);
+
+    await link.fill("https://example.com/offer");
+    await expect(page.getByText("URL must start with http:// or https://")).toHaveCount(0);
+    await expect(link).toHaveAttribute("aria-invalid", "false");
+  });
+});
+
 test.describe("bulk send", () => {
   test("pick recipients and a template, confirm, and the campaign starts", async ({ page }) => {
     const api = await installFakeApi(page);

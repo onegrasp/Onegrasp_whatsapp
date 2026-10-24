@@ -1,9 +1,13 @@
 const { z } = require("zod");
+const { isHttpUrl, HTTP_URL_MESSAGE } = require("../utils/url");
+
+// http(s) only: z.string().url() alone also accepts javascript:, data:, ftp:…
+const httpUrl = () => z.string().refine(isHttpUrl, HTTP_URL_MESSAGE);
 
 const buttonSchema = z.object({
   type: z.enum(["quick_reply", "reply", "URL", "phone", "call_to_action"]),
   text: z.string().min(1, "Button text is required"),
-  url: z.string().url("Invalid URL format").optional().nullable().or(z.literal("")),
+  url: httpUrl().optional().nullable().or(z.literal("")),
   phone: z.string().optional().nullable().or(z.literal("")),
 });
 
@@ -15,7 +19,7 @@ const templateSchema = z.object({
   language: z.string().min(2).max(5).default("en"),
   variables: z.array(z.string()).optional().default([]),
   buttons: z.array(buttonSchema).optional().default([]),
-  headerImageUrl: z.string().url("Invalid header image URL").optional().nullable().or(z.literal("")),
+  headerImageUrl: httpUrl().optional().nullable().or(z.literal("")),
   version: z.number().int().positive().optional().default(1),
 });
 

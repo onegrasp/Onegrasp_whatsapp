@@ -1,4 +1,5 @@
 const { z } = require("zod");
+const { isHttpUrl, HTTP_URL_MESSAGE } = require("../utils/url");
 
 // One-to-one send (Chats and the send-message API). Bounds keep oversized or
 // malformed input away from the provider.
@@ -8,7 +9,7 @@ const sendMessageSchema = z.object({
   type: z.enum(["text", "template"]).default("text"),
   templateName: z.string().max(200).optional().nullable(),
   params: z.array(z.union([z.string(), z.number()]).transform(String).pipe(z.string().max(1024))).max(20).optional().default([]),
-  mediaUrl: z.string().max(2048).regex(/^https?:\/\//i, "Attachment must be a web link (http or https)").optional().nullable().or(z.literal("")),
+  mediaUrl: z.string().max(2048).refine(isHttpUrl, HTTP_URL_MESSAGE).optional().nullable().or(z.literal("")),
 }).refine(
   (data) => {
     if (data.type === "template") return !!data.templateName;
