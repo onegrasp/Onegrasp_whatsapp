@@ -134,6 +134,20 @@ const messageRepository = {
   },
 
   // Has an agent or auto-reply (not a campaign) written to this phone since?
+  // Has this number written to us after `sinceISO`?
+  async hasIncomingSince(phone, sinceISO) {
+    const clean = String(phone || "").replace(/^\+/, "");
+    const { data, error } = await supabase
+      .from("messages")
+      .select("id")
+      .in("phone", [`+${clean}`, clean])
+      .eq("direction", "incoming")
+      .gt("timestamp", sinceISO)
+      .limit(1);
+    if (error) throw error;
+    return Boolean(data && data.length);
+  },
+
   async hasNonCampaignOutgoingSince(phone, sinceISO) {
     const { data, error } = await supabase
       .from("messages")

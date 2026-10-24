@@ -5,6 +5,7 @@ const { validateAndFormatE164 } = require("../utils/phone");
 const { resolveTemplateText, validateTemplateParameters } = require("../utils/templateHelper");
 const templateRepository = require("../repositories/templateRepository");
 const messageRepository = require("../repositories/messageRepository");
+const sendingPolicy = require("../services/sendingPolicy");
 
 const sendSingle = async (req, res) => {
   const io = req.app.get("io");
@@ -28,7 +29,16 @@ const sendSingle = async (req, res) => {
     });
   }
 
-  // 2. Safeguard: Pre-validate Template Parameters
+  // 2. Opt-outs apply to every send path, not just campaigns.
+  try {
+    const blocked = await sendingPolicy.optOutBlockReason(formatted, { template: type === "template" });
+    if (blocked) return res.status(409).json({ error: blocked, category: "opt_out" });
+  } catch (err) {
+    logger.error("Could not check opt-out status before sending", { error: err.message });
+    return res.status(503).json({ error: "Couldn't check whether this contact opted out. Please try again." });
+  }
+
+  // 3. Safeguard: Pre-validate Template Parameters
   if (type === "template" && templateName) {
     try {
       let tpl = await templateRepository.findByName(templateName);

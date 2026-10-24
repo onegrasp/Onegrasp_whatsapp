@@ -46,3 +46,6 @@ export const downloadSampleCsv = () => {
 };
 
 export const UPLOAD_ACCEPT = ".csv,.xlsx,.xls,.xlsb,.xlsm,.ods,.xml,.txt,.tsv,.prn";
+
+// Matches the server's limit (backend/src/utils/csvParser.js).
+export const MAX_UPLOAD_MB = 10;

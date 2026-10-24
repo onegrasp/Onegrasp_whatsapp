@@ -1,6 +1,11 @@
 const XLSX = require("xlsx");
 const { parse } = require("csv-parse/sync");
 const { validateAndFormatE164, applyCountryCode, INVISIBLE_CHARS } = require("./phone");
+const AppError = require("../errors/AppError");
+
+// Upload limits: the file is held and parsed in memory.
+const MAX_CONTACT_FILE_MB = 10;
+const MAX_CONTACT_ROWS = 50000;
 
 /**
  * Spreadsheet & CSV parser for bulk contact uploads.
@@ -142,7 +147,9 @@ function readRawRows(buffer) {
   // 1. SheetJS raw matrix (.xlsx, .xls, .xlsb, .ods, .csv ...). raw: true keeps
   //    CSV text as text, so "9.19E+11" can be detected as corrupted.
   try {
-    const workbook = XLSX.read(buffer, { type: "buffer", raw: true, cellDates: false });
+    // sheetRows stops reading just past the limit, so huge sheets aren't fully
+    // loaded only to be rejected.
+    const workbook = XLSX.read(buffer, { type: "buffer", raw: true, cellDates: false, sheetRows: MAX_CONTACT_ROWS + 2 });
     if (workbook && workbook.SheetNames && workbook.SheetNames.length > 0) {
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
       const matrix = XLSX.utils.sheet_to_json(firstSheet, { header: 1, raw: true, defval: "" });
@@ -263,6 +270,14 @@ const parseContactsFile = async (buffer) => {
 
   const rawRows = readRawRows(buffer);
   if (rawRows.length === 0) return empty;
+  // +1 allows for a header row.
+  if (rawRows.length > MAX_CONTACT_ROWS + 1) {
+    throw new AppError(
+      `This file has more than ${MAX_CONTACT_ROWS.toLocaleString("en-US")} rows. Split it into smaller files and import them one at a time.`,
+      422,
+      "too_many_rows"
+    );
+  }
 
   const { cols, hasHeaders } = detectColumns(rawRows);
   const dataRows = hasHeaders ? rawRows.slice(1) : rawRows;
@@ -326,4 +341,4 @@ const parseCSV = async (buffer) => {
   return contacts.map((c) => ({ phone: c.phone, name: c.name || c.phone, label: "none" }));
 };
 
-module.exports = { parseContactsFile, parseCSV, readPhoneCell };
+module.exports = { parseContactsFile, parseCSV, readPhoneCell, MAX_CONTACT_FILE_MB, MAX_CONTACT_ROWS };

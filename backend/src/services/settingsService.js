@@ -1,5 +1,6 @@
 const settingsRepository = require("../repositories/settingsRepository");
 const { clearTwilioConfigCache } = require("../config/twilio");
+const env = require("../config/env");
 
 const MASKED_TOKEN = "••••••••";
 
@@ -59,6 +60,12 @@ const settingsService = {
       settingsObj.twilioAuthToken = MASKED_TOKEN;
     }
 
+    // Production always verifies webhook signatures; the UI shows it as locked.
+    if (env.IS_PRODUCTION) {
+      settingsObj.validateWebhookSignature = true;
+      settingsObj.webhookSignatureLocked = true;
+    }
+
     return settingsObj;
   },
 
@@ -107,6 +114,7 @@ const settingsService = {
       if (NUMERIC_FIELDS.has(field)) val = toNonNegativeNumber(val, SAFEGUARD_DEFAULTS[field]);
       if (field === "quietHoursEnabled") val = val === true || val === "true";
       if (field === "twilioAuthToken" && val === MASKED_TOKEN) continue;
+      if (field === "validateWebhookSignature" && env.IS_PRODUCTION) continue;
 
       await settingsRepository.upsert(field, val);
     }

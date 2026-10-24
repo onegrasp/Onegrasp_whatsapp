@@ -21,7 +21,7 @@
     "multer": "^2.0.1",
     "socket.io": "^4.6.1",
     "twilio": "^6.0.2",
-    "xlsx": "^0.18.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.4.3"
   },
   "devDependencies": {

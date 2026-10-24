@@ -2,6 +2,7 @@ const conversationRepository = require("../repositories/conversationRepository")
 const messageRepository = require("../repositories/messageRepository");
 const contactRepository = require("../repositories/contactRepository");
 const whatsappService = require("./whatsappService");
+const sendingPolicy = require("./sendingPolicy");
 const { resolveTemplateText, resolveTemplateSendTarget } = require("../utils/templateHelper");
 const { validateAndFormatE164 } = require("../utils/phone");
 const AppError = require("../errors/AppError");
@@ -80,6 +81,9 @@ const messageService = {
     if (!isValid) {
       throw new AppError(`Invalid phone number format: '${phone}'. Must follow E.164 standard.`, 400, "invalid_phone");
     }
+
+    const blocked = await sendingPolicy.optOutBlockReason(formatted, { template: type === "template" });
+    if (blocked) throw new AppError(blocked, 409, "opt_out");
 
     const contact = await contactRepository.findByPhone(formatted);
     const contactName = contact?.name && contact.name !== formatted ? contact.name : "Valued Customer";

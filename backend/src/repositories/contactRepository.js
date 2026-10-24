@@ -415,6 +415,18 @@ const contactRepository = {
     return result;
   },
 
+  // The opt-out record for a number, or null. Throws if it can't be read, so a
+  // send path never treats "couldn't check" as "not opted out".
+  async findOptOut(phone) {
+    const { data, error } = await supabase
+      .from("opt_outs")
+      .select("phone, opted_out_at, created_at")
+      .in("phone", phoneVariants(phone))
+      .limit(1);
+    if (error) throw error;
+    return (data && data[0]) || null;
+  },
+
   async isOptedOut(phone) {
     try {
       const variants = phoneVariants(phone);

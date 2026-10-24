@@ -109,6 +109,24 @@ const hasQuietHoursOverride = (campaign) =>
 
 const getSafeguards = () => settingsService.getSafeguards();
 
+/**
+ * Why a one-to-one message to `phone` must not be sent, or null if it may.
+ * Opted-out numbers never get templates (business-initiated, usually
+ * marketing). A free-form reply is allowed only if the person has written to
+ * us since opting out, i.e. we're answering them; WhatsApp's 24-hour window
+ * still applies on top.
+ */
+const optOutBlockReason = async (phone, { template = false } = {}) => {
+  const optOut = await contactRepository.findOptOut(phone);
+  if (!optOut) return null;
+  if (template) {
+    return "This contact opted out, so templates can't be sent to them. They can opt back in by replying START.";
+  }
+  const since = optOut.opted_out_at || optOut.created_at;
+  if (since && (await messageRepository.hasIncomingSince(phone, since))) return null;
+  return "This contact opted out. You can reply once they message you again, or they can opt back in by replying START.";
+};
+
 module.exports = {
   analyzeRecipients,
   getDailyUsage,
@@ -118,4 +136,5 @@ module.exports = {
   getSafeguards,
   markQuietHoursOverride,
   hasQuietHoursOverride,
+  optOutBlockReason,
 };

@@ -93,19 +93,22 @@ const logDiagnosis = async (req, tokens, urls) => {
 };
 
 /**
- * Verifies the X-Twilio-Signature header. Validation is on by default and is
- * skipped only when the `validateWebhookSignature` setting is explicitly false.
- * Any error fails closed.
+ * Verifies the X-Twilio-Signature header. In production it is always checked.
+ * Elsewhere it is skipped only when the `validateWebhookSignature` setting is
+ * explicitly false (for local testing). Any error fails closed.
  */
 const verifySignature = async (req) => {
   try {
-    try {
-      const row = await settingsRepository.findByKey("validateWebhookSignature");
-      if (row && (row.value === false || row.value === "false")) {
-        return true;
+    if (!env.IS_PRODUCTION) {
+      try {
+        const row = await settingsRepository.findByKey("validateWebhookSignature");
+        if (row && (row.value === false || row.value === "false")) {
+          logger.warn("Accepted an unverified Twilio webhook: signature checks are turned off in Settings.", { path: req.originalUrl });
+          return true;
+        }
+      } catch (e) {
+        // Could not read the setting — keep the secure default (validate).
       }
-    } catch (e) {
-      // Could not read the setting — keep the secure default (validate).
     }
 
     const signature = req.headers["x-twilio-signature"];

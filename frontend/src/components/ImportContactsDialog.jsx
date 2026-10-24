@@ -3,7 +3,7 @@ import { Download, FileSpreadsheet, Upload } from "lucide-react";
 import { uploadContacts } from "../services/api";
 import { Badge, Dialog, ErrorState, Field } from "./ui";
 import ConsentFields from "./ConsentFields";
-import { BUILT_IN_SETS, UPLOAD_ACCEPT, downloadSampleCsv, formatSetName } from "../lib/contacts";
+import { BUILT_IN_SETS, MAX_UPLOAD_MB, UPLOAD_ACCEPT, downloadSampleCsv, formatSetName } from "../lib/contacts";
 import { errorMessage, formatNumber } from "../lib/format";
 
 const ISSUE_TONE = { invalid: "danger", duplicate: "warning", existing: "neutral", warning: "info" };
@@ -191,7 +191,7 @@ export default function ImportContactsDialog({ open, onClose, defaultSet = "all"
               <FileSpreadsheet size={20} className="text-gray-400" aria-hidden="true" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm text-gray-900">{file ? file.name : "No file selected"}</p>
-                <p className="text-xs text-gray-500">CSV, Excel (.xlsx, .xls) or ODS</p>
+                <p className="text-xs text-gray-500">CSV, Excel (.xlsx, .xls) or ODS, up to {MAX_UPLOAD_MB} MB</p>
               </div>
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()}>
                 <Upload size={14} aria-hidden="true" />
@@ -203,7 +203,14 @@ export default function ImportContactsDialog({ open, onClose, defaultSet = "all"
                 accept={UPLOAD_ACCEPT}
                 className="sr-only"
                 onChange={(e) => {
-                  setFile(e.target.files?.[0] || null);
+                  const picked = e.target.files?.[0] || null;
+                  if (picked && picked.size > MAX_UPLOAD_MB * 1024 * 1024) {
+                    setFile(null);
+                    e.target.value = "";
+                    setError(`This file is larger than ${MAX_UPLOAD_MB} MB. Split it into smaller files and import them one at a time.`);
+                    return;
+                  }
+                  setFile(picked);
                   setError("");
                 }}
               />

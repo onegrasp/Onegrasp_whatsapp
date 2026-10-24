@@ -393,7 +393,7 @@ export default function Chats() {
           <div className="shrink-0 border-t border-gray-200 bg-white px-4 py-3">
             {selectedConv?.isOptedOut && (
               <p className="mb-2 rounded-md bg-red-50 px-3 py-1.5 text-xs text-red-800">
-                This contact opted out. Only reply to their questions; don't send marketing. They can opt back in by replying START.
+                This contact opted out. You can only reply after they message you again, and never send marketing. They can opt back in by replying START.
               </p>
             )}
             {attachmentFile && (
