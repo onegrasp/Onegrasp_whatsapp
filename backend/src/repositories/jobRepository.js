@@ -11,6 +11,12 @@ const jobRepository = {
     return data;
   },
 
+  // Inserts without reading the rows back (large batches exceed the 1,000-row page).
+  async insertMany(jobsArray) {
+    const { error } = await supabase.from("jobs").insert(jobsArray);
+    if (error) throw error;
+  },
+
   async createBatch(jobsArray) {
     const { data, error } = await supabase
       .from("jobs")

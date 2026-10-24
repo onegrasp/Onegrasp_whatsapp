@@ -8,6 +8,7 @@ import { useToast } from "../components/feedback";
 import { useSettings } from "../components/SettingsDialog";
 import { formatSetName } from "../lib/contacts";
 import { errorMessage, formatDayLabel, formatRelative } from "../lib/format";
+import useDebouncedValue from "../lib/useDebouncedValue";
 
 const isSamePhone = (p1, p2) => {
   if (!p1 || !p2) return false;
@@ -61,16 +62,21 @@ export default function Chats() {
   const inputRef = useRef(null);
   const chatMediaRef = useRef(null);
 
+  const debouncedSearch = useDebouncedValue(search, 300);
+  // Only the newest request may update the list (older ones can arrive later).
+  const latestConvRequest = useRef(0);
+
   const loadConversations = useCallback(async () => {
+    const requestId = ++latestConvRequest.current;
     try {
-      const res = await getConversations({ search });
-      setConversations(res.data || []);
+      const res = await getConversations({ search: debouncedSearch });
+      if (requestId === latestConvRequest.current) setConversations(res.data || []);
     } catch (err) {
       console.error(err);
     } finally {
-      setLoadingConvs(false);
+      if (requestId === latestConvRequest.current) setLoadingConvs(false);
     }
-  }, [search]);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     loadConversations();

@@ -13,7 +13,7 @@ import Campaigns from "./pages/Campaigns";
 import Templates from "./pages/Templates";
 import Logs from "./pages/Logs";
 import NotFound from "./pages/NotFound";
-import { login as apiLogin } from "./services/api";
+import { login as apiLogin, logout as apiLogout } from "./services/api";
 
 function Login({ onLoginSuccess }) {
   const [password, setPassword] = useState("");
@@ -93,9 +93,9 @@ function Login({ onLoginSuccess }) {
 export default function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem("token"));
 
-  const handleLogout = () => {
-    sessionStorage.removeItem("token");
-    localStorage.removeItem("token");
+  // Signs out on the server too, so the token stops working everywhere.
+  const handleLogout = async () => {
+    await apiLogout();
     setToken(null);
   };
 

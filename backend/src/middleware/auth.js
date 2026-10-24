@@ -1,5 +1,5 @@
-const jwt = require("jsonwebtoken");
-const env = require("../config/env");
+const sessionService = require("../services/sessionService");
+const { getContext } = require("../context/requestContext");
 
 const PUBLIC_EXACT_ROUTES = new Set([
   "/auth/login",
@@ -9,7 +9,11 @@ const PUBLIC_EXACT_ROUTES = new Set([
   "/api/v1/health",
   "/api/health",
   "/ready",
+  "/api/v1/ready",
+  "/api/ready",
   "/live",
+  "/api/v1/live",
+  "/api/live",
   "/webhook",
   "/api/v1/webhook",
   "/api/webhook",
@@ -33,7 +37,7 @@ const PUBLIC_PATH_PREFIXES = [
   "/api/auth"
 ];
 
-const authenticateToken = (req, res, next) => {
+const authenticateToken = async (req, res, next) => {
   // Normalize request path without query strings
   const rawPath = (req.path || req.baseUrl || "").toLowerCase();
   const normalizedPath = rawPath.replace(/\/+$/, "") || "/";
@@ -46,8 +50,7 @@ const authenticateToken = (req, res, next) => {
     return next();
   }
 
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1];
+  const token = sessionService.bearerToken(req);
 
   if (!token) {
     return res.status(401).json({
@@ -60,18 +63,20 @@ const authenticateToken = (req, res, next) => {
   }
 
   try {
-    const verified = jwt.verify(token, env.JWT_SECRET);
-    req.user = verified;
-    next();
+    req.user = await sessionService.verify(token);
   } catch (err) {
-    return res.status(403).json({
+    // 401 (not 403) so the app sends the user back to the sign-in screen.
+    return res.status(401).json({
       success: false,
       error: {
-        code: "forbidden",
-        message: "Invalid or expired authorization token"
+        code: "session_expired",
+        message: "Your session has expired. Please sign in again."
       }
     });
   }
+  // Attribute this request's logs and audit entries.
+  getContext().userId = req.user.role || "admin";
+  next();
 };
 
 module.exports = authenticateToken;

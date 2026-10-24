@@ -39,6 +39,9 @@ const settingsService = {
     (settings || []).forEach((s) => {
       settingsObj[s.key] = s.value;
     });
+    // Internal records, not settings.
+    delete settingsObj.revokedSessions;
+    delete settingsObj.twilioApiSecret;
 
     if (settingsObj.autoReplyEnabled === undefined) settingsObj.autoReplyEnabled = false;
     if (settingsObj.autoReplyMessage === undefined) {
@@ -56,8 +59,9 @@ const settingsService = {
       if (settingsObj[key] === undefined) settingsObj[key] = value;
     });
 
-    if (settingsObj.twilioAuthToken) {
-      settingsObj.twilioAuthToken = MASKED_TOKEN;
+    // Credentials never leave the server.
+    for (const key of ["twilioAuthToken", "metaAccessToken", "accessToken"]) {
+      if (settingsObj[key]) settingsObj[key] = MASKED_TOKEN;
     }
 
     // Production always verifies webhook signatures; the UI shows it as locked.

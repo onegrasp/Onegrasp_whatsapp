@@ -1,7 +1,14 @@
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const logger = require("../utils/logger");
 const supabase = require("../config/supabase");
+
+// 128 random bits plus the original extension (WhatsApp checks the type).
+const randomMediaName = (originalName) => {
+  const ext = path.extname(originalName || "").toLowerCase().replace(/[^.a-z0-9]/g, "").slice(0, 8);
+  return `${crypto.randomBytes(16).toString("hex")}${ext}`;
+};
 
 const uploadMedia = async (req, res, next) => {
   try {
@@ -29,14 +36,16 @@ const uploadMedia = async (req, res, next) => {
         }
 
         const fileBuffer = fs.readFileSync(req.file.path);
-        const fileName = `${Date.now()}-${path.basename(req.file.originalname)}`;
+        // WhatsApp fetches media from a public link, so the link itself is the
+        // protection: a random, unguessable name (not the original file name).
+        const fileName = randomMediaName(req.file.originalname);
         storagePath = fileName;
 
         const { data: uploadData, error: uploadErr } = await supabase.storage
           .from(bucketName)
           .upload(fileName, fileBuffer, {
             contentType: req.file.mimetype,
-            upsert: true,
+            upsert: false,
           });
 
         if (uploadErr) throw uploadErr;
@@ -48,7 +57,8 @@ const uploadMedia = async (req, res, next) => {
         if (urlData && urlData.publicUrl) {
           publicUrl = urlData.publicUrl;
           uploadedToCloud = true;
-          logger.info(`File uploaded to Supabase Storage bucket: ${bucketName}`, { publicUrl });
+          // The link grants access, so it isn't logged.
+          logger.info(`File uploaded to Supabase Storage bucket: ${bucketName}`, { mimeType: req.file.mimetype, size: req.file.size });
 
           try {
             fs.unlinkSync(req.file.path);
@@ -82,7 +92,7 @@ const uploadMedia = async (req, res, next) => {
 
       publicUrl = `${baseUrl}/uploads/${req.file.filename}`;
       storagePath = req.file.path;
-      logger.info(`File uploaded to local disk: ${req.file.filename}`, { publicUrl });
+      logger.info("File uploaded to local disk", { mimeType: req.file.mimetype, size: req.file.size });
     }
 
     try {

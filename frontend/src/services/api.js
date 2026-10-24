@@ -1,10 +1,7 @@
 import axios from "axios";
+import { API_ORIGIN } from "../lib/config";
 
-const rawUrl = import.meta.env.VITE_API_URL || "https://onegrasp-backend.onrender.com";
-const cleanUrl = rawUrl.replace(/\/+$/, "");
-const baseURL = cleanUrl.endsWith("/api/v1") ? cleanUrl : `${cleanUrl}/api/v1`;
-
-console.log("[API] Connecting to backend at:", baseURL);
+const baseURL = `${API_ORIGIN}/api/v1`;
 
 const api = axios.create({
   baseURL,
@@ -34,9 +31,10 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Session expired or signed out: back to the sign-in screen.
     if (error.response?.status === 401) {
-      const isAuthLogin = error.config?.url?.includes("/auth/login");
-      if (!isAuthLogin) {
+      const isAuthCall = /\/auth\/(login|logout)/.test(error.config?.url || "");
+      if (!isAuthCall) {
         sessionStorage.removeItem("token");
         localStorage.removeItem("token");
         window.location.href = "/";
@@ -70,10 +68,11 @@ try {
 
 // Auth
 export const login = (password) => api.post("/auth/login", { password });
-export const logout = () => {
+// Tells the server first (it needs the token to block it), then forgets it.
+export const logout = async () => {
+  await api.post("/auth/logout").catch(() => {});
   sessionStorage.removeItem("token");
   localStorage.removeItem("token");
-  return api.post("/auth/logout").catch(() => {});
 };
 
 // Contacts

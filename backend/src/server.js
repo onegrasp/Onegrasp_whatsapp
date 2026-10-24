@@ -3,8 +3,10 @@ const env = require("./config/env");
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
-const jwt = require("jsonwebtoken");
 const { Server } = require("socket.io");
+const sessionService = require("./services/sessionService");
+const settingsRepository = require("./repositories/settingsRepository");
+const supabaseClient = require("./config/supabase");
 const logger = require("./utils/logger");
 
 const apiV1Router = require("./routes/v1");
@@ -12,6 +14,7 @@ const path = require("path");
 const queueWorker = require("./workers/queueWorker");
 const requestLogger = require("./middleware/requestLogger");
 const authenticateToken = require("./middleware/auth");
+const auditTrail = require("./middleware/auditTrail");
 const errorHandler = require("./errors/errorHandler");
 
 const { contextMiddleware } = require("./context/requestContext");
@@ -41,10 +44,17 @@ app.use((req, res, next) => {
   next();
 });
 
-// Configure CORS origin handling
+// Browsers may call the API only from these origins. Set FRONTEND_URL
+// (comma-separated) to override the defaults.
+const DEFAULT_ORIGINS = [
+  "https://whatsapp.onegrasp.com",
+  "https://onegraspconnect.vercel.app",
+  "http://localhost:5173",
+  "http://localhost:3000",
+];
 const allowedOrigins = env.FRONTEND_URL && env.FRONTEND_URL !== "*"
   ? env.FRONTEND_URL.split(",").map((o) => o.trim())
-  : ["https://onegraspconnects.vercel.app", "http://localhost:5173", "http://localhost:3000"];
+  : DEFAULT_ORIGINS;
 
 const isOriginAllowed = (origin) => {
   // No Origin header: non-browser clients (curl, server-to-server, webhooks).
@@ -91,14 +101,14 @@ const io = new Server(server, {
 // Authenticate socket connections. Without this, any client that can reach the
 // server receives every broadcast event (live chats, campaign progress). Only a
 // client presenting a valid admin JWT may connect.
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   try {
     const bearer = (socket.handshake.headers?.authorization || "").replace(/^Bearer\s+/i, "");
     const token = socket.handshake.auth?.token || bearer;
     if (!token) {
       return next(new Error("unauthorized"));
     }
-    socket.user = jwt.verify(token, env.JWT_SECRET);
+    socket.user = await sessionService.verify(token);
     return next();
   } catch (err) {
     return next(new Error("unauthorized"));
@@ -111,12 +121,24 @@ setIo(io);
 // Core event bus handling configuration
 registerHandlers();
 
-// Serve uploaded media as downloads with MIME sniffing disabled, so an uploaded
-// HTML/SVG file cannot be rendered as an active document in the same origin.
+// Encrypt any credentials saved before settings encryption existed.
+if (supabaseClient.isConfigured) {
+  settingsRepository
+    .encryptStoredSecrets()
+    .then((count) => count && logger.info(`Encrypted ${count} saved credential(s) in settings.`))
+    .catch((err) => logger.warn("Could not encrypt saved credentials", { error: err.message }));
+}
+
+// Uploaded media must stay public: WhatsApp/Twilio download it from this link
+// without our login. File names are 128 random bits, so a link can't be
+// guessed; there is no directory listing. Served as downloads with MIME
+// sniffing disabled, so an uploaded HTML/SVG file can't run in this origin.
 app.use("/uploads", express.static(path.join(__dirname, "../uploads"), {
+  index: false,
   setHeaders: (res) => {
     res.setHeader("Content-Disposition", "attachment");
     res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "private, max-age=86400");
   },
 }));
 
@@ -131,6 +153,9 @@ app.get("/health", (req, res) => {
 
 // JWT Verification for Protected Endpoints
 app.use(authenticateToken);
+
+// Record every change made through the API (after auth, so the actor is known).
+app.use(auditTrail);
 
 // Mount Versioned API across all URL variants
 app.use("/api/v1", apiV1Router);
@@ -164,5 +189,28 @@ if (!isVercel) {
 }
 
 app.use(errorHandler);
+
+// Render sends SIGTERM before replacing the process on a deploy. Finish the
+// message being sent and close connections, instead of being cut off.
+let shuttingDown = false;
+const shutdown = async (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`${signal} received: shutting down gracefully`);
+  const forceExit = setTimeout(() => process.exit(0), 10000);
+  forceExit.unref();
+  try {
+    await queueWorker.stop();
+    io.close();
+    await new Promise((resolve) => server.close(() => resolve()));
+  } catch (err) {
+    logger.error("Error during shutdown", { error: err });
+  }
+  process.exit(0);
+};
+if (!isVercel) {
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+}
 
 module.exports = { app, io };

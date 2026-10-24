@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { io } from "socket.io-client";
+import { API_ORIGIN } from "../lib/config";
 
 const SocketContext = createContext(null);
 
@@ -10,8 +11,7 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     let s = null;
     try {
-      const rawUrl = import.meta.env.VITE_API_URL || "https://onegrasp-backend.onrender.com";
-      const socketUrl = rawUrl.replace(/\/+$/, "").replace(/\/api\/v1$/, "");
+      const socketUrl = API_ORIGIN;
 
       // The backend now requires a valid admin JWT to open a socket, so send the
       // session token on the handshake.

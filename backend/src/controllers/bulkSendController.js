@@ -2,6 +2,7 @@ const supabase = require("../utils/supabase");
 const logger = require("../utils/logger");
 const { validateTemplateParameters } = require("../utils/templateHelper");
 const templateRepository = require("../repositories/templateRepository");
+const jobRepository = require("../repositories/jobRepository");
 const templateService = require("../services/templateService");
 const {
   analyzeRecipients,
@@ -34,6 +35,9 @@ const campaignPreflight = async (req, res, next) => {
   try {
     const { phones = [], type = "template", templateName, mediaUrl = "", skipRecentDays, requireConsent = false, scheduledAt = null } = req.body || {};
     if (!Array.isArray(phones)) return res.status(400).json({ error: "phones must be an array" });
+    if (phones.length > MAX_BULK_RECIPIENTS) {
+      return res.status(400).json({ error: `A campaign can have at most ${MAX_BULK_RECIPIENTS.toLocaleString("en-US")} recipients.` });
+    }
 
     // A template WhatsApp hasn't approved, or an image added to a template
     // without one, is rejected for every recipient.
@@ -73,6 +77,22 @@ const campaignPreflight = async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+};
+
+// Saves a campaign's jobs on hold, then releases them in one update. If any
+// part fails, whatever was saved is cancelled and the error is rethrown, so a
+// failed attempt sends nothing and can safely be retried. (Saving them as
+// runnable straight away let the first chunks send while a later chunk failed.)
+const queueJobsAllOrNothing = async (campaignId, jobs) => {
+  try {
+    for (let i = 0; i < jobs.length; i += JOB_INSERT_CHUNK) {
+      await jobRepository.insertMany(jobs.slice(i, i + JOB_INSERT_CHUNK));
+    }
+    await jobRepository.setStatusForCampaign(campaignId, ["paused"], "pending");
+  } catch (err) {
+    await jobRepository.setStatusForCampaign(campaignId, ["paused", "pending"], "cancelled").catch(() => {});
+    throw err;
   }
 };
 
@@ -279,17 +299,18 @@ const sendBulk = async (req, res) => {
         message: resolvedMsgText,
         params: resolvedParams,
         media_url: mediaUrl,
-        status: "pending",
+        // Held until every job is saved (see queueJobsAllOrNothing).
+        status: "paused",
         run_at: runTimes[i].toISOString(),
       };
     });
 
-    for (let i = 0; i < jobsToInsert.length; i += JOB_INSERT_CHUNK) {
-      const { error: batchInsertError } = await supabase.from("jobs").insert(jobsToInsert.slice(i, i + JOB_INSERT_CHUNK));
-      if (batchInsertError) {
-        logger.error("Failed to insert jobs in Supabase:", { error: batchInsertError });
-        return res.status(500).json({ error: "Failed to queue bulk campaign tasks" });
-      }
+    try {
+      await queueJobsAllOrNothing(campaign.id, jobsToInsert);
+    } catch (queueErr) {
+      logger.error("Failed to queue campaign jobs; nothing was sent", { campaignId: campaign.id, error: queueErr });
+      await supabase.from("campaigns").update({ status: "failed" }).eq("id", campaign.id);
+      return res.status(500).json({ error: "The campaign couldn't be queued, so nothing was sent. Please try again." });
     }
     logger.info(`Queued ${jobsToInsert.length} sending tasks inside campaign ${campaign.id}`);
 
@@ -319,8 +340,8 @@ const sendBulk = async (req, res) => {
     });
   } catch (err) {
     logger.error("Bulk send failed", { error: err });
-    res.status(500).json({ error: err.message || "Failed to start campaign" });
+    res.status(500).json({ error: "The campaign couldn't be started. Please try again." });
   }
 };
 
-module.exports = { sendBulk, campaignPreflight };
+module.exports = { sendBulk, campaignPreflight, queueJobsAllOrNothing };

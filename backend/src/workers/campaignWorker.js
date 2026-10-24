@@ -77,8 +77,15 @@ const process = async (job) => {
 
   const sendOptions = { language };
 
+  // A job can run again after a crash or a stale-job recovery. Never send the
+  // same campaign to the same person twice.
+  if (job.campaign_id && (await messageRepository.hasCampaignMessage(job.campaign_id, job.phone))) {
+    logger.warn(`Campaign ${job.campaign_id} already reached ${job.phone}; not sending again.`);
+    return { alreadySent: true };
+  }
+
+  let result;
   try {
-    let result;
     if (job.type === "template") {
       result = personalizedParams.length > 0
         ? await whatsappService.sendTemplateWithParams(
@@ -99,55 +106,6 @@ const process = async (job) => {
     } else {
       result = await whatsappService.sendTextMessage(job.phone, personalizedMessage, job.media_url);
     }
-
-    const messageSid = result?.messages?.[0]?.id || result?.sid || "";
-
-    const savedMsg = await messageRepository.create({
-      phone: job.phone,
-      contact_name: contactName,
-      text: templateDisplayText,
-      type: job.type === "template" ? "template" : "text",
-      direction: "outgoing",
-      status: "sent",
-      message_id: messageSid,
-      template_name: job.template_name || "",
-      campaign_id: job.campaign_id,
-      media_url: job.media_url || "",
-      timestamp: new Date().toISOString(),
-    });
-
-    try {
-      await conversationRepository.upsert({
-        phone: job.phone,
-        contact_name: contactName,
-        last_message: savedMsg.text,
-        last_direction: "outgoing",
-        last_status: "sent",
-        last_timestamp: savedMsg.timestamp,
-      });
-    } catch (convErr) {
-      logger.warn("Conversation upsert warning after message creation:", { error: convErr.message });
-    }
-
-    const io = getIo();
-    if (io) {
-      io.emit("new_message", {
-        _id: savedMsg.id,
-        phone: savedMsg.phone,
-        contactName: savedMsg.contact_name,
-        text: savedMsg.text,
-        type: savedMsg.type,
-        direction: savedMsg.direction,
-        status: savedMsg.status,
-        messageId: savedMsg.message_id,
-        templateName: savedMsg.template_name,
-        campaignId: savedMsg.campaign_id,
-        mediaUrl: job.media_url || "",
-        timestamp: savedMsg.timestamp,
-      });
-    }
-
-    return { messageSid, savedMsg };
   } catch (err) {
     logger.error(`Campaign job send failed for phone ${job.phone}:`, { error: err.message, category: err.category });
     // The retry worker decides whether this is final and records the failure
@@ -156,6 +114,62 @@ const process = async (job) => {
     err.contactName = contactName;
     throw err;
   }
+
+  // The message is out. Nothing below may throw: the job would be retried and
+  // the person would get the message again.
+  const messageSid = result?.messages?.[0]?.id || result?.sid || null;
+  const record = {
+    phone: job.phone,
+    contact_name: contactName,
+    text: templateDisplayText,
+    type: job.type === "template" ? "template" : "text",
+    direction: "outgoing",
+    status: "sent",
+    message_id: messageSid,
+    template_name: job.template_name || "",
+    campaign_id: job.campaign_id,
+    media_url: job.media_url || "",
+    timestamp: new Date().toISOString(),
+  };
+  let savedMsg = record;
+  try {
+    savedMsg = await messageRepository.create(record);
+  } catch (dbErr) {
+    logger.error(`Message to ${job.phone} was sent but couldn't be saved`, { error: dbErr.message, messageSid });
+  }
+
+  try {
+    await conversationRepository.upsert({
+      phone: job.phone,
+      contact_name: contactName,
+      last_message: savedMsg.text,
+      last_direction: "outgoing",
+      last_status: "sent",
+      last_timestamp: savedMsg.timestamp,
+    });
+  } catch (convErr) {
+    logger.warn("Conversation upsert warning after message creation:", { error: convErr.message });
+  }
+
+  const io = getIo();
+  if (io) {
+    io.emit("new_message", {
+      _id: savedMsg.id || messageSid,
+      phone: savedMsg.phone,
+      contactName: savedMsg.contact_name,
+      text: savedMsg.text,
+      type: savedMsg.type,
+      direction: savedMsg.direction,
+      status: savedMsg.status,
+      messageId: savedMsg.message_id,
+      templateName: savedMsg.template_name,
+      campaignId: savedMsg.campaign_id,
+      mediaUrl: job.media_url || "",
+      timestamp: savedMsg.timestamp,
+    });
+  }
+
+  return { messageSid, savedMsg };
 };
 
 module.exports = { process };

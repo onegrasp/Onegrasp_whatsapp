@@ -23,7 +23,7 @@ const normalizePhone = (phoneStr, defaultCountryCode = DEFAULT_CC) => {
   // as-is and let validation reject it.
   clean = hasLetters(clean) ? clean.replace(/[\s\-\(\)\+]/g, "") : clean.replace(/\D/g, "");
 
-  // Strip leading zeroes (e.g., 00918142151161 -> 918142151161, 08142151161 -> 8142151161)
+  // Strip leading zeroes (e.g., 00919876543210 -> 919876543210, 09876543210 -> 9876543210)
   if (clean.startsWith("00")) {
     clean = clean.slice(2);
   } else if (clean.startsWith("0") && clean.length >= 11) {

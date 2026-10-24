@@ -6,20 +6,41 @@ const { resolveTemplateText, validateTemplateParameters } = require("../utils/te
 const templateRepository = require("../repositories/templateRepository");
 const messageRepository = require("../repositories/messageRepository");
 const sendingPolicy = require("../services/sendingPolicy");
+const { validateSendMessage } = require("../validators/message.validator");
 
 const sendSingle = async (req, res) => {
   const io = req.app.get("io");
   const rawBody = req.body || {};
-  const phone = rawBody.phone || rawBody.to || rawBody.recipient || rawBody.phoneNumber;
-  const message = rawBody.message || rawBody.text || rawBody.bodyText || "";
-  const type = rawBody.type || (rawBody.templateName || rawBody.template_name ? "template" : "text");
-  const templateName = rawBody.templateName || rawBody.template_name || "";
-  const params = Array.isArray(rawBody.params) ? rawBody.params : (rawBody.parameters || []);
-  const mediaUrl = rawBody.mediaUrl || rawBody.media_url || rawBody.imageUrl || "";
+  const rawPhone = rawBody.phone || rawBody.to || rawBody.recipient || rawBody.phoneNumber;
+  const rawMessage = rawBody.message || rawBody.text || rawBody.bodyText || "";
+  const rawTemplateName = rawBody.templateName || rawBody.template_name || "";
+  const rawMediaUrl = rawBody.mediaUrl || rawBody.media_url || rawBody.imageUrl || "";
 
-  if (!phone || (!message && !templateName && !mediaUrl)) {
+  if (!rawPhone || (!rawMessage && !rawTemplateName && !rawMediaUrl)) {
     return res.status(400).json({ error: "Phone and a message, template or attachment are required" });
   }
+
+  // Accepts the field aliases above, then validates types and sizes.
+  let input;
+  try {
+    input = validateSendMessage({
+      phone: String(rawPhone),
+      message: rawMessage,
+      type: rawBody.type || (rawTemplateName ? "template" : "text"),
+      templateName: rawTemplateName,
+      params: Array.isArray(rawBody.params) ? rawBody.params : (rawBody.parameters || []),
+      mediaUrl: rawMediaUrl,
+    });
+  } catch (err) {
+    const reason = Array.isArray(err.issues) && err.issues[0] ? err.issues[0].message : "Invalid message";
+    return res.status(400).json({ error: reason });
+  }
+  const phone = input.phone;
+  const message = input.message || "";
+  const type = input.type;
+  const templateName = input.templateName || "";
+  const params = input.params;
+  const mediaUrl = input.mediaUrl || "";
 
   // 1. Phone Validation
   const { isValid, formatted } = validateAndFormatE164(phone);
@@ -57,8 +78,8 @@ const sendSingle = async (req, res) => {
     }
   }
 
+  let result;
   try {
-    let result;
     if (type === "template") {
       result = params.length > 0
         ? await whatsappService.sendTemplateWithParams(formatted, templateName, params, mediaUrl, message)
@@ -66,237 +87,150 @@ const sendSingle = async (req, res) => {
     } else {
       result = await whatsappService.sendTextMessage(formatted, message, mediaUrl);
     }
+  } catch (err) {
+    return recordSendFailure({ err, io, res, phone, formatted, message, type, templateName, mediaUrl });
+  }
 
-    let contactName = "Customer";
+  // The message is out. Nothing below may report it as failed (it would be
+  // sent again), so errors are logged and the record falls back to what we know.
+  let contactName = "Customer";
+  try {
+    const { data: contact } = await supabase
+      .from("contacts")
+      .select("name")
+      .eq("phone", formatted)
+      .maybeSingle();
+    if (contact?.name) contactName = contact.name;
+  } catch (e) {}
+
+  let templateDisplayText = message;
+  const needsTemplateText = type === "template" ||
+    (templateDisplayText && (templateDisplayText.startsWith("HX") || templateDisplayText.startsWith("[Template:")));
+  if (needsTemplateText) {
     try {
-      const { data: contact } = await supabase
-        .from("contacts")
-        .select("name")
-        .eq("phone", formatted)
-        .maybeSingle();
-      if (contact?.name) contactName = contact.name;
-    } catch (e) {}
-
-    let templateDisplayText = message;
-    const needsTemplateText = type === "template" ||
-      (templateDisplayText && (templateDisplayText.startsWith("HX") || templateDisplayText.startsWith("[Template:")));
-    if (needsTemplateText) {
       templateDisplayText = await resolveTemplateText(templateName, params, message || "");
+    } catch (e) {
+      templateDisplayText = message || `[Template: ${templateName}]`;
     }
+  }
 
-    const messageSid = result?.messages?.[0]?.id || result?.sid || `SM_${Date.now()}`;
-    const timestamp = new Date().toISOString();
+  const messageSid = result?.messages?.[0]?.id || result?.sid || null;
+  const timestamp = new Date().toISOString();
 
-    const record = {
+  const record = {
+    phone: formatted,
+    contact_name: contactName,
+    text: templateDisplayText || "",
+    type,
+    direction: "outgoing",
+    status: "sent",
+    message_id: messageSid,
+    template_name: templateName || "",
+    media_url: mediaUrl || "",
+    timestamp,
+  };
+  let savedMsg = { id: `msg_${Date.now()}`, ...record };
+
+  try {
+    savedMsg = await messageRepository.create(record);
+
+    try {
+      await supabase.from("conversations").upsert({
+        phone: formatted,
+        contact_name: contactName || formatted,
+        last_message: savedMsg.text || (mediaUrl ? "Image" : ""),
+        last_direction: "outgoing",
+        last_status: "sent",
+        last_timestamp: timestamp,
+      });
+    } catch (convErr) {}
+  } catch (dbErr) {
+    logger.warn("Message was sent but couldn't be saved:", { error: dbErr.message });
+  }
+
+  if (io) {
+    io.emit("new_message", {
+      _id: savedMsg.id || `msg_${Date.now()}`,
+      phone: savedMsg.phone,
+      contactName: savedMsg.contact_name || contactName,
+      text: savedMsg.text,
+      type: savedMsg.type,
+      direction: savedMsg.direction,
+      status: savedMsg.status,
+      messageId: savedMsg.message_id || messageSid || "",
+      mediaUrl: mediaUrl || "",
+      timestamp: savedMsg.timestamp,
+    });
+  }
+
+  return res.json({ message: "Message sent", data: savedMsg });
+};
+
+// The provider refused the message: record it as failed in the chat.
+const recordSendFailure = async ({ err, io, res, phone, formatted, message, type, templateName, mediaUrl }) => {
+  logger.error("Failed to send single WhatsApp message:", { phone, error: err });
+  // Provider errors carry a mapped, user-facing reason (and a category);
+  // anything else is internal and gets a plain message.
+  const errorMsg = err.category ? err.message || String(err) : "The message couldn't be sent. Please try again.";
+  const errorCategory = err.category || "other";
+
+  try {
+    const { data: contact } = await supabase
+      .from("contacts")
+      .select("name")
+      .eq("phone", formatted)
+      .maybeSingle();
+
+    const failText = message || (templateName ? `[Template: ${templateName}]` : "");
+    const failTime = new Date().toISOString();
+
+    const savedMsg = await messageRepository.create({
       phone: formatted,
-      contact_name: contactName,
-      text: templateDisplayText || "",
+      contact_name: contact?.name || "",
+      text: failText,
       type,
       direction: "outgoing",
-      status: "sent",
-      message_id: messageSid,
+      status: "failed",
       template_name: templateName || "",
+      error_details: errorMsg,
+      error_category: errorCategory,
       media_url: mediaUrl || "",
-      timestamp,
-    };
-    let savedMsg = { id: `msg_${Date.now()}`, ...record };
+      timestamp: failTime,
+    }).catch(() => null);
 
-    try {
-      savedMsg = await messageRepository.create(record);
-
-      try {
-        await supabase.from("conversations").upsert({
-          phone: formatted,
-          contact_name: contactName || formatted,
-          last_message: savedMsg.text || (mediaUrl ? "Image" : ""),
-          last_direction: "outgoing",
-          last_status: "sent",
-          last_timestamp: timestamp,
-        });
-      } catch (convErr) {}
-    } catch (dbErr) {
-      logger.warn("Database persistence skipped for message:", { error: dbErr.message });
-    }
+    // Update Conversation failure summary
+    await supabase.from("conversations").upsert({
+      phone: formatted,
+      contact_name: contact?.name || formatted,
+      last_message: failText,
+      last_direction: "outgoing",
+      last_status: "failed",
+      last_timestamp: failTime,
+    });
 
     if (io) {
       io.emit("new_message", {
-        _id: savedMsg.id || `msg_${Date.now()}`,
-        phone: savedMsg.phone,
-        contactName: savedMsg.contact_name || contactName,
-        text: savedMsg.text,
-        type: savedMsg.type,
-        direction: savedMsg.direction,
-        status: savedMsg.status,
-        messageId: savedMsg.message_id || messageSid,
-        mediaUrl: mediaUrl || "",
-        timestamp: savedMsg.timestamp,
-      });
-    }
-
-    return res.json({ message: "Message sent", data: savedMsg });
-  } catch (err) {
-    logger.error("Failed to send single WhatsApp message:", { phone, error: err });
-    const errorMsg = err.message || String(err);
-    const errorCategory = err.category || "other";
-
-    try {
-      const { data: contact } = await supabase
-        .from("contacts")
-        .select("name")
-        .eq("phone", formatted)
-        .maybeSingle();
-
-      const failText = message || (templateName ? `[Template: ${templateName}]` : "");
-      const failTime = new Date().toISOString();
-
-      const savedMsg = await messageRepository.create({
+        _id: savedMsg?.id,
         phone: formatted,
-        contact_name: contact?.name || "",
+        contactName: contact?.name || "",
         text: failText,
-        type,
+        type: type,
         direction: "outgoing",
         status: "failed",
-        template_name: templateName || "",
-        error_details: errorMsg,
-        error_category: errorCategory,
-        media_url: mediaUrl || "",
+        messageId: "",
+        mediaUrl: mediaUrl || "",
+        errorDetails: errorMsg,
         timestamp: failTime,
-      }).catch(() => null);
-
-      // Update Conversation failure summary
-      await supabase.from("conversations").upsert({
-        phone: formatted,
-        contact_name: contact?.name || formatted,
-        last_message: failText,
-        last_direction: "outgoing",
-        last_status: "failed",
-        last_timestamp: failTime,
       });
-
-      if (io) {
-        io.emit("new_message", {
-          _id: savedMsg?.id,
-          phone: formatted,
-          contactName: contact?.name || "",
-          text: failText,
-          type: type,
-          direction: "outgoing",
-          status: "failed",
-          messageId: "",
-          mediaUrl: mediaUrl || "",
-          errorDetails: errorMsg,
-          timestamp: failTime,
-        });
-      }
-    } catch (saveErr) {
-      logger.error("Failed to save outbound failure message log:", { error: saveErr });
     }
-
-    res.status(500).json({ error: errorMsg, category: errorCategory });
+  } catch (saveErr) {
+    logger.error("Failed to save outbound failure message log:", { error: saveErr });
   }
-};
 
-// Get campaign message logs
-const getCampaignMessages = async (req, res) => {
-  try {
-    const { data: messages, error } = await supabase
-      .from("messages")
-      .select("*")
-      .eq("campaign_id", req.params.id)
-      .order("created_at", { ascending: true });
-
-    if (error) throw error;
-
-    // Map database properties (like id -> _id, error_details -> errorDetails) to keep frontend compatibility
-    const mapped = (messages || []).map((m) => ({
-      _id: m.id,
-      phone: m.phone,
-      contactName: m.contact_name,
-      text: m.text,
-      type: m.type,
-      direction: m.direction,
-      status: m.status,
-      messageId: m.message_id,
-      errorDetails: m.error_details,
-      timestamp: m.timestamp,
-    }));
-
-    res.json(mapped);
-  } catch (err) {
-    logger.error("Failed to fetch campaign messages from Supabase:", { error: err });
-    res.status(500).json({ error: "Failed to fetch campaign logs" });
-  }
-};
-
-// Get campaigns
-const getCampaigns = async (req, res) => {
-  try {
-    const { data: campaigns, error } = await supabase
-      .from("campaigns")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    if (error) throw error;
-
-    const mapped = (campaigns || []).map((c) => ({
-      _id: c.id,
-      name: c.name,
-      message: c.message,
-      templateName: c.template_name,
-      type: c.type,
-      totalContacts: c.total_contacts,
-      sentCount: c.sent_count,
-      deliveredCount: c.delivered_count,
-      readCount: c.read_count,
-      failedCount: c.failed_count,
-      status: c.status,
-      createdAt: c.created_at,
-    }));
-
-    res.json(mapped);
-  } catch (err) {
-    logger.error("Failed to fetch campaigns from Supabase:", { error: err });
-    res.status(500).json({ error: "Failed to fetch campaigns" });
-  }
-};
-
-// Return templates from local Supabase database
-const getTemplates = async (req, res) => {
-  try {
-    const { data: templates } = await supabase
-      .from("templates")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    const mapped = (templates || []).map((t) => ({
-      _id: t.id,
-      id: t.id,
-      name: t.name,
-      contentSid: t.content_sid,
-      content_sid: t.content_sid,
-      body: t.body || "",
-      type: t.type || "text",
-      category: t.category || "UTILITY",
-      language: t.language || "en",
-      status: t.status || "draft",
-      buttons: t.buttons || [],
-      listItems: t.list_items,
-      variables: t.variables || [],
-      createdAt: t.created_at,
-    }));
-
-    res.json({ data: mapped });
-  } catch (err) {
-    logger.error("Failed to fetch templates from Supabase:", { error: err });
-    res.status(500).json({ error: "Failed to fetch templates", data: [] });
-  }
+  return res.status(500).json({ error: errorMsg, category: errorCategory });
 };
 
 module.exports = {
   sendSingle,
-  getCampaigns,
-  getTemplates,
-  getCampaignMessages,
   validateAndFormatE164,
 };

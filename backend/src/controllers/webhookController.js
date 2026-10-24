@@ -38,9 +38,11 @@ const handleMetaWebhookEvent = async (req, res, next) => {
     const events = parseMetaWebhookBody(req.body);
     logger.info(`Received Meta Webhook Payload with ${events.length} parsed event(s).`);
 
-    events.forEach((ev) => {
+    // Handled in order and finished before replying, so nothing is lost if the
+    // host stops right after the response.
+    for (const ev of events) {
       if (ev.type === "status_update") {
-        eventBus.publish("MessageStatusEvent", {
+        await eventBus.publish("MessageStatusEvent", {
           phone: ev.phone,
           messageSid: ev.messageSid,
           status: ev.status,
@@ -48,7 +50,7 @@ const handleMetaWebhookEvent = async (req, res, next) => {
           errorCategory: ev.errorCategory,
         });
       } else if (ev.type === "incoming_message") {
-        eventBus.publish("IncomingMessageEvent", {
+        await eventBus.publish("IncomingMessageEvent", {
           from: ev.from,
           to: ev.to,
           messageSid: ev.messageSid,
@@ -57,7 +59,7 @@ const handleMetaWebhookEvent = async (req, res, next) => {
           type: ev.msgType,
         });
       }
-    });
+    }
 
     res.status(200).send("EVENT_RECEIVED");
   } catch (err) {
@@ -85,7 +87,8 @@ const handleTwilioIncomingMessage = async (req, res, next) => {
       }
     }
 
-    eventBus.publish("IncomingMessageEvent", {
+    // Finished before replying (see handleMetaWebhookEvent).
+    await eventBus.publish("IncomingMessageEvent", {
       from: payload.from,
       to: payload.to,
       messageSid: payload.messageSid,
@@ -121,7 +124,7 @@ const handleTwilioStatusUpdate = async (req, res, next) => {
       errorCategory = errorMap.category;
     }
 
-    eventBus.publish("MessageStatusEvent", {
+    await eventBus.publish("MessageStatusEvent", {
       phone: payload.to,
       messageSid: payload.messageSid,
       status: mappedStatus,

@@ -20,6 +20,7 @@ const PERSISTENT_CATEGORIES = new Set([
   "account_restricted",
   "policy_violation",
   "sandbox_not_joined",
+  "invalid_job",
 ]);
 
 // Records the final failure once (earlier attempts are not logged as

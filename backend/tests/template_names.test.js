@@ -131,6 +131,12 @@ test("creating or renaming to a deleted template's name works; an active name is
   });
 });
 
+test("a media template without an image can't be submitted (no stand-in picture is sent)", async () => {
+  await withTable([{ id: "m1", name: "promo_img", type: "media", body: "Hi", buttons: [], header_image_url: "" }], async () => {
+    await assert.rejects(templateService.submitTemplate("m1"), /Add an image/);
+  });
+});
+
 test("database duplicate errors become a readable 409", () => {
   let sent;
   const res = { status: (code) => ({ json: (body) => { sent = { code, body }; } }) };

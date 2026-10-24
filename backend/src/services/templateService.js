@@ -216,9 +216,13 @@ const templateService = {
         };
       }
     } else if (template.type === "media") {
+      // Never fall back to a stand-in picture: recipients would receive it.
+      if (!template.header_image_url) {
+        throw new AppError("Add an image to this media template before submitting it.", 400, "validation_error");
+      }
       types["twilio/media"] = {
         body: template.body,
-        media: [template.header_image_url || "https://wcnfmuxtygwejrhlqqvu.supabase.co/storage/v1/object/public/whatsapp-media/1784287979883-test_image.png"]
+        media: [template.header_image_url],
       };
     } else {
       types["twilio/text"] = {

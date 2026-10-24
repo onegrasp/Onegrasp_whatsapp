@@ -1,8 +1,11 @@
 const supabase = require("../config/supabase");
+const { sanitizeFilterValue } = require("./queryHelpers");
 
 const conversationRepository = {
-  async findAll() {
-    const { data, error } = await supabase
+  // The most recent conversations, optionally filtered by name or number. The
+  // search runs in the database so older conversations can still be found.
+  async findAll({ search = "", limit = 500 } = {}) {
+    let query = supabase
       .from("conversations")
       .select(`
         phone,
@@ -19,8 +22,13 @@ const conversationRepository = {
           is_active
         )
       `)
-      .order("last_timestamp", { ascending: false });
+      .order("last_timestamp", { ascending: false })
+      .limit(limit);
 
+    const s = sanitizeFilterValue(search);
+    if (s) query = query.or(`contact_name.ilike.%${s}%,phone.ilike.%${s}%`);
+
+    const { data, error } = await query;
     if (error) throw error;
     return data;
   },

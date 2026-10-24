@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, Plus, Search, Trash2, Upload, Users } from "lucide-react";
 import {
   getContacts,
@@ -16,6 +16,7 @@ import ImportContactsDialog from "../components/ImportContactsDialog";
 import ConsentFields from "../components/ConsentFields";
 import { BUILT_IN_SETS, STATUS_LABELS, customSetsFrom, downloadSampleCsv, formatSetName } from "../lib/contacts";
 import { errorMessage, formatDate, formatNumber } from "../lib/format";
+import useDebouncedValue from "../lib/useDebouncedValue";
 
 const PAGE_SIZE = 50;
 
@@ -263,26 +264,33 @@ export default function Contacts() {
     }
   }, []);
 
+  const debouncedSearch = useDebouncedValue(search, 300);
+  // Only the newest request may update the table (older ones can arrive later).
+  const latestRequest = useRef(0);
+
   const load = useCallback(async () => {
+    const requestId = ++latestRequest.current;
     setLoading(true);
     setLoadError("");
     try {
       const res = await getContacts({
-        search,
+        search: debouncedSearch,
         set: filterSet !== "all" ? filterSet : undefined,
         page,
         limit: PAGE_SIZE,
       });
+      if (requestId !== latestRequest.current) return;
       setContacts(res.data.contacts || []);
       setTotal(res.data.total || 0);
       setSelectedIds([]);
     } catch (err) {
+      if (requestId !== latestRequest.current) return;
       console.error(err);
       setLoadError("Contacts could not be loaded.");
     } finally {
-      setLoading(false);
+      if (requestId === latestRequest.current) setLoading(false);
     }
-  }, [search, filterSet, page]);
+  }, [debouncedSearch, filterSet, page]);
 
   useEffect(() => {
     loadSets();

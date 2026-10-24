@@ -1,15 +1,15 @@
 const supabase = require("../config/supabase");
 const client = require("../integrations/twilio/client");
 const metrics = require("../utils/metrics");
+const logger = require("../utils/logger");
 
+// Public liveness probe: just "the process is up".
 const getLive = (req, res) => {
-  const stats = metrics.getStats();
   res.json({
     success: true,
     status: "alive",
     timestamp: new Date(),
     uptime: process.uptime(),
-    metrics: stats,
   });
 };
 
@@ -28,7 +28,9 @@ const getReady = async (req, res) => {
     if (error) throw error;
     status.database = "ready";
   } catch (err) {
-    status.database = "error: " + err.message;
+    // Public endpoint: report the state, keep the details in the log.
+    logger.warn("Readiness check: database unavailable", { error: err.message });
+    status.database = "unavailable";
     code = 503;
   }
 
@@ -45,7 +47,8 @@ const getReady = async (req, res) => {
       code = 503;
     }
   } catch (err) {
-    status.twilio = "error: " + err.message;
+    logger.warn("Readiness check: Twilio configuration unavailable", { error: err.message });
+    status.twilio = "unavailable";
     code = 503;
   }
 

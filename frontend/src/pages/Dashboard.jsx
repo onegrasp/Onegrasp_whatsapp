@@ -44,13 +44,8 @@ export default function Dashboard() {
     load();
   }, [load]);
 
-  const totalOutgoing = (stats?.sentMessages || 0) + (stats?.deliveredMessages || 0) + (stats?.failedMessages || 0);
-  const effectiveDelivered = (stats?.deliveredMessages || 0) > 0
-    ? (stats.deliveredMessages || 0)
-    : Math.max(0, (stats?.sentMessages || 0) - (stats?.failedMessages || 0));
-  const deliveryRate = totalOutgoing > 0
-    ? Math.min(100, Math.max(0, Math.round((effectiveDelivered / totalOutgoing) * 100)))
-    : 0;
+  // Computed on the server from outgoing messages only (replies don't count).
+  const deliveryRate = stats?.deliveryRate || 0;
 
   return (
     <Page header={<PageHeader title="Dashboard" description="Messaging activity across all campaigns and chats." />}>
@@ -60,7 +55,7 @@ export default function Dashboard() {
         <section aria-label="Key metrics" className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-gray-200 bg-gray-200 sm:grid-cols-2 xl:grid-cols-4">
           <Metric loading={loading} label="Contacts" value={formatNumber(stats?.totalContacts)} />
           <Metric loading={loading} label="Messages" value={formatNumber(stats?.totalMessages)} detail="Sent and received" />
-          <Metric loading={loading} label="Delivery rate" value={`${deliveryRate}%`} detail="Delivered or read, of outgoing" />
+          <Metric loading={loading} label="Delivery rate" value={`${deliveryRate}%`} detail="Outgoing messages delivered or read" />
           <Metric loading={loading} label="Replies received" value={formatNumber(stats?.incomingMessages)} />
         </section>
 

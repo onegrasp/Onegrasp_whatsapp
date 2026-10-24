@@ -9,11 +9,16 @@ const verifyMetaWebhook = async (req) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode && token) {
-    if (mode === "subscribe" && token === (config.verifyToken || "whatsapp_system_verify_token")) {
-      logger.info("Meta Webhook Verified Successfully");
-      return { isValid: true, challenge };
-    }
+  // No built-in default: without a configured token, verification is refused.
+  const expected = config.verifyToken || "";
+  if (!expected) {
+    logger.warn("Meta webhook verification refused: set META_WEBHOOK_VERIFY_TOKEN first.");
+    return { isValid: false, challenge: null };
+  }
+  if (mode === "subscribe" && typeof token === "string" && token.length === expected.length &&
+      crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected))) {
+    logger.info("Meta Webhook Verified Successfully");
+    return { isValid: true, challenge };
   }
   return { isValid: false, challenge: null };
 };

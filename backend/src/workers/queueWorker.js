@@ -2,10 +2,6 @@ const jobRepository = require("../repositories/jobRepository");
 const settingsRepository = require("../repositories/settingsRepository");
 const campaignRepository = require("../repositories/campaignRepository");
 const campaignWorker = require("./campaignWorker");
-const webhookWorker = require("./webhookWorker");
-const templateSyncWorker = require("./templateSyncWorker");
-const mediaWorker = require("./mediaWorker");
-const analyticsWorker = require("./analyticsWorker");
 const retryWorker = require("./retryWorker");
 const statusSyncWorker = require("./statusSyncWorker");
 const templateApprovalWorker = require("./templateApprovalWorker");
@@ -16,6 +12,8 @@ const logger = require("../utils/logger");
 
 let isRunning = false;
 let workerLoopTimeout = null;
+let inFlight = null; // the job being sent right now, if any
+const timers = [];
 
 const cleanupOldJobs = async () => {
   try {
@@ -68,21 +66,16 @@ const admitCampaignJob = async (job) => {
   return true;
 };
 
+// The queue only carries outgoing messages (campaigns and auto-replies).
+// Anything else fails visibly instead of being guessed at or marked done.
 const runJob = async (job) => {
   if (job.type === "template" || job.type === "text") {
     await campaignWorker.process(job);
-  } else if (job.type === "webhook_event") {
-    await webhookWorker.process(job);
-  } else if (job.type === "template_sync") {
-    await templateSyncWorker.process(job);
-  } else if (job.type === "media_upload") {
-    await mediaWorker.process(job);
-  } else if (job.type === "analytics_update") {
-    await analyticsWorker.process(job);
-  } else {
-    logger.warn(`Unknown job type: ${job.type}. Defaulting to campaign processing.`);
-    await campaignWorker.process(job);
+    return;
   }
+  const err = new Error(`Unsupported job type "${job.type}"`);
+  err.category = "invalid_job";
+  throw err;
 };
 
 // Runs one pulled job end to end. Returns true if it was sent.
@@ -92,16 +85,29 @@ const handleJob = async (job) => {
   logger.info(`Processing job ${job.id} (type: ${job.type}) for phone ${job.phone}`);
   try {
     await runJob(job);
-    await jobRepository.update(job.id, { status: "completed" });
-    await refreshCampaignProgress(job.campaign_id, { phone: job.phone, status: "sent" });
-    return true;
   } catch (err) {
     const result = await retryWorker.scheduleRetry(job, err);
     if (result.type === "permanent_fail") {
-      await refreshCampaignProgress(job.campaign_id, { phone: job.phone, status: "failed" });
+      await refreshCampaignProgress(job.campaign_id, { phone: job.phone, status: "failed" }).catch((e) =>
+        logger.error("Could not refresh campaign progress", { error: e.message })
+      );
     }
     return false;
   }
+
+  // Sent. Bookkeeping errors are logged, never retried: a retry would send the
+  // message again.
+  try {
+    await jobRepository.update(job.id, { status: "completed" });
+  } catch (err) {
+    logger.error(`Job ${job.id} was sent but couldn't be marked completed`, { error: err.message });
+  }
+  try {
+    await refreshCampaignProgress(job.campaign_id, { phone: job.phone, status: "sent" });
+  } catch (err) {
+    logger.error("Could not refresh campaign progress", { error: err.message });
+  }
+  return true;
 };
 
 const start = () => {
@@ -112,20 +118,24 @@ const start = () => {
 
   cleanupOldJobs();
   recoverStaleJobs();
-  setInterval(cleanupOldJobs, 12 * 60 * 60 * 1000);
-  setInterval(recoverStaleJobs, 5 * 60 * 1000);
+  timers.push(setInterval(cleanupOldJobs, 12 * 60 * 60 * 1000));
+  timers.push(setInterval(recoverStaleJobs, 5 * 60 * 1000));
   statusSyncWorker.start();
   templateApprovalWorker.start();
 };
 
+// Stops taking new jobs. Resolves once the job being sent (if any) is done,
+// so a shutdown never cuts a send off half-way.
 const stop = () => {
   isRunning = false;
   if (workerLoopTimeout) {
     clearTimeout(workerLoopTimeout);
   }
+  timers.splice(0).forEach(clearInterval);
   statusSyncWorker.stop();
   templateApprovalWorker.stop();
   logger.info("Specialized Queue worker dispatcher stopped");
+  return inFlight || Promise.resolve();
 };
 
 const processQueue = async () => {
@@ -139,7 +149,13 @@ const processQueue = async () => {
       return;
     }
 
-    await handleJob(job);
+    inFlight = handleJob(job);
+    try {
+      await inFlight;
+    } finally {
+      inFlight = null;
+    }
+    if (!isRunning) return;
 
     let sendingRate = 2;
     try {
@@ -169,4 +185,4 @@ const processBatch = async (maxJobs = 50) => {
   return processedCount;
 };
 
-module.exports = { start, stop, processBatch, admitCampaignJob };
+module.exports = { start, stop, processBatch, admitCampaignJob, handleJob };

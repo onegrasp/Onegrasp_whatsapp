@@ -10,9 +10,10 @@ const webhookRoutes = require("./webhooks");
 const healthRoutes = require("./health");
 const logsRoutes = require("./logs");
 
-const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const env = require("../../config/env");
+const sessionService = require("../../services/sessionService");
+const auditService = require("../../services/auditService");
 
 // Constant-time password comparison that does not leak length via early return.
 const passwordMatches = (candidate, expected) => {
@@ -23,7 +24,7 @@ const passwordMatches = (candidate, expected) => {
   return crypto.timingSafeEqual(a, b);
 };
 
-// Auth login route with 24h session expiration
+// Sign in. Sessions last sessionService.SESSION_HOURS.
 router.post("/auth/login", async (req, res) => {
   const { password } = req.body || {};
 
@@ -35,14 +36,11 @@ router.post("/auth/login", async (req, res) => {
   }
 
   if (passwordMatches(password, env.ADMIN_PASSWORD)) {
-    const token = jwt.sign(
-      { role: "admin", iat: Math.floor(Date.now() / 1000) },
-      env.JWT_SECRET,
-      { expiresIn: "24h" }
-    );
-    return res.json({ success: true, token });
+    auditService.record("login", "session", null, { ip: req.ip });
+    return res.json({ success: true, token: sessionService.issue() });
   }
 
+  auditService.record("login_failed", "session", null, { ip: req.ip });
   // Small delay on failure to blunt rapid guessing.
   await new Promise((resolve) => setTimeout(resolve, 500));
 
@@ -55,8 +53,16 @@ router.post("/auth/login", async (req, res) => {
   });
 });
 
-// Auth logout route
-router.post("/auth/logout", (req, res) => {
+// Sign out: the token stops working immediately, not when it expires.
+router.post("/auth/logout", async (req, res) => {
+  const token = sessionService.bearerToken(req);
+  try {
+    if (token && (await sessionService.revoke(token))) {
+      auditService.record("logout", "session", null, { ip: req.ip });
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, error: { code: "internal", message: "Could not sign out. Please try again." } });
+  }
   return res.json({ success: true, message: "Logged out successfully" });
 });
 

@@ -11,8 +11,6 @@ const { validateTwilioSignature } = require("../../utils/webhookValidator");
 // Meta WhatsApp Cloud API Webhook Endpoints
 router.get("/webhook", handleMetaWebhookVerification);
 router.post("/webhook", handleMetaWebhookEvent);
-router.get("/meta", handleMetaWebhookVerification);
-router.post("/meta", handleMetaWebhookEvent);
 
 // Twilio Webhook Endpoints
 router.post("/webhook/twilio/message", validateTwilioSignature, handleTwilioIncomingMessage);

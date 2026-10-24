@@ -96,12 +96,14 @@ It is a **single-tenant, single-admin** app — there are no user accounts, just
 | Frontend | **Vercel** | `https://onegraspconnect.vercel.app` |
 | Backend API | **Render** | `https://onegrasp-backend.onrender.com` |
 | Database | **Supabase** | your Supabase project URL |
-| WhatsApp sending | **Twilio** | Account SID `ACf9a5c2...`, number `+91 9121039333` |
+| WhatsApp sending | **Twilio** | see the Twilio Console (account and number are not recorded here) |
 
 > The frontend knows the backend URL from the `VITE_API_URL` build-time env var. If that isn't
-> set, it **falls back to a hardcoded default** of `https://onegrasp-backend.onrender.com`
-> (see [`frontend/src/services/api.js`](frontend/src/services/api.js)). That's why the backend
-> URL appears "magically" even without configuration.
+> set, production builds use `https://onegrasp-backend.onrender.com` and local development
+> (`npm run dev`) uses `http://localhost:5000`, so a laptop never touches production data by
+> accident (see [`frontend/src/lib/config.js`](frontend/src/lib/config.js)). If the production
+> API address changes, also update `connect-src` in `frontend/vercel.json`: the browser is only
+> allowed to talk to that address.
 
 ---
 
@@ -264,7 +266,11 @@ if you set up a fresh database, run `supabase_schema.sql`, then `migrations.sql`
 consent and "not on WhatsApp" flags, campaign pause reasons, and two SQL helpers for the daily-limit
 and cooldown checks), then `migrations/006_quiet_hours_override.sql`, then
 `migrations/007_security_hardening.sql` (pins the SQL functions' `search_path`, stops the public API
-keys calling them, and indexes `conversations.last_message_id`).
+keys calling them, and indexes `conversations.last_message_id`), then
+`migrations/008_schema_catch_up.sql` (`templates.header_image_url`, and an index the campaign
+worker uses to never message the same number twice in one campaign).
+
+Unfinished drafts that must **not** be run live in `docs/drafts/`.
 
 With RLS on, `SUPABASE_KEY` must be the **service_role / secret** key. The backend logs a warning
 at startup if it's the anon / publishable key.
@@ -287,6 +293,25 @@ at startup if it's the anon / publishable key.
 - Limits, cooldowns and quiet hours are set in the app's Settings. An urgent campaign can skip quiet
   hours with **Send now anyway** in the send confirmation (`ignoreQuietHours`; stored on
   `campaigns.ignore_quiet_hours` by `migrations/006_quiet_hours_override.sql`).
+- **Opt-outs apply to Chats too:** templates are never sent to an opted-out number, and a free-form
+  reply is allowed only after the person writes again (`sendingPolicy.optOutBlockReason`).
+- **No duplicate sends:** once WhatsApp accepts a message, later errors (saving it, updating the job)
+  are logged, never retried. A campaign also checks it hasn't already reached a number before
+  sending. Campaign jobs are queued on hold and released together, so a failed queueing sends nothing.
+
+### Security & privacy
+- **Sessions** last 12 hours. Signing out blocks that token on the server (`services/sessionService.js`).
+- **Audit trail:** every change made through the API is written to `audit_logs`
+  (`middleware/auditTrail.js`), plus sign-ins and sign-outs. Entries record which fields changed, never
+  message text, phone lists or secrets.
+- **Logs** never contain request bodies; phone numbers keep only their last 4 digits, message text is
+  replaced by its length and secrets are hidden (`utils/logger.js`).
+- **Saved credentials** (Twilio auth token etc.) are encrypted in the `settings` table with a key from
+  `SETTINGS_ENCRYPTION_KEY` (or `JWT_SECRET`). Changing that key makes saved credentials unreadable:
+  re-enter them in Settings.
+- **Uploaded media** has to stay publicly downloadable (WhatsApp fetches it from the link), so files
+  get random 128-bit names instead.
+- **Webhook signatures** are always verified in production.
 
 ---
 
@@ -328,12 +353,15 @@ Set these on the **backend host (Render)**. See [`backend/.env.example`](backend
 | `TWILIO_ACCOUNT_SID` | ✅ (Twilio) | `AC...` account SID. |
 | `TWILIO_API_KEY` / `TWILIO_API_SECRET` | ✅ (Twilio) | API key auth for sending. |
 | `TWILIO_AUTH_TOKEN` | ⚠️ | Needed to verify **incoming** Twilio webhooks (not for sending). |
-| `TWILIO_WHATSAPP_NUMBER` | ✅ (Twilio) | e.g. `whatsapp:+919121039333`. |
+| `TWILIO_WHATSAPP_NUMBER` | ✅ (Twilio) | Your WhatsApp sender, e.g. `whatsapp:+919876543210`. |
 | `TWILIO_MODE` | ✅ (Twilio) | `production` or `sandbox`. |
 | `TWILIO_MESSAGING_SERVICE_SID` | optional | If you use a Messaging Service (`MG...`). |
 | `CRON_SECRET` | ⚠️ | Protects the `/api/jobs/process-queue` endpoint (needed only on serverless hosting). |
 | `META_*` | optional | Only if using Meta instead of/alongside Twilio (`META_ACCESS_TOKEN`, `META_PHONE_NUMBER_ID`, `META_APP_SECRET`, etc.). |
 | `DEFAULT_COUNTRY_CODE` | optional | Country code for bare local numbers (default `91` = India). |
+| `SETTINGS_ENCRYPTION_KEY` | optional | Key for encrypting credentials saved in Settings. Defaults to `JWT_SECRET`. Set it if you ever plan to rotate `JWT_SECRET`. |
+| `TRUST_PROXY_HOPS` | optional | Reverse proxies in front of the app (default `1`, right for Render). Set `2` if you add e.g. Cloudflare in front. |
+| `META_WEBHOOK_VERIFY_TOKEN` | Meta only | Required to verify a Meta webhook; there is no built-in default. |
 
 **Frontend build-time variable (set on Vercel):**
 | `VITE_API_URL` | The backend URL the frontend calls, e.g. `https://onegrasp-backend.onrender.com`. Must trigger a redeploy to take effect. |
@@ -360,7 +388,9 @@ npm run dev                 # starts on http://localhost:5173
 - The frontend dev server proxies `/api` to `http://localhost:5000` (see `vite.config.js`).
 - For webhooks locally, expose the backend with a tunnel (e.g. `npx ngrok http 5000`) and point
   Twilio/Meta at the public URL.
-- Database: run `supabase_schema.sql`, `migrations.sql`, then `migrations/003` to `migrations/007` in order, in the Supabase SQL editor first.
+- Database: run `supabase_schema.sql`, `migrations.sql`, then `migrations/003` to `migrations/008` in order, in the Supabase SQL editor first.
+- Tests: `cd backend && npm test`. GitHub Actions (`.github/workflows/ci.yml`) runs the tests, the
+  frontend build and a dependency audit on every push; a red ✗ means don't deploy.
 
 ---
 
@@ -395,26 +425,24 @@ These are the non-obvious things that have caused real issues:
    (or a small built-in default). If you add a new frontend domain, add it to `FRONTEND_URL` on Render,
    or the browser will show "Unable to connect." (Note: the live domain is `onegraspconnect` — singular.)
 
-3. **The backend URL is hardcoded as a fallback** in `frontend/src/services/api.js`
-   (`https://onegrasp-backend.onrender.com`). If you move the backend, set `VITE_API_URL` on Vercel.
+3. **The production backend URL is the default** in `frontend/src/lib/config.js`
+   (`https://onegrasp-backend.onrender.com`). If you move the backend, set `VITE_API_URL` on Vercel
+   **and** update `connect-src` in `frontend/vercel.json`, or the browser will block the new address.
 
-4. **Templates with image + text + BUTTONS can't be built in this app.** The app builds such templates
-   as a Twilio "card", which only keeps a short title and **drops the body text** — so the message
-   arrives with the text missing. For image + long text + buttons, build the template directly in
-   **Meta WhatsApp Manager** (or Twilio Content Template Builder). Image + text **without** buttons
-   works fine in the app.
+4. **Templates with image + text + buttons** are built as a `whatsapp/card`, which keeps the body
+   text (up to 1,024 characters). Media templates must have an image before they can be submitted.
 
 5. **Free text only works within WhatsApp's 24-hour window.** For cold outreach you must use an
    **approved template**. WhatsApp always delivers the *approved* template content — not the preview
    shown in the app (the preview reads from this app's DB, which can differ from what's approved).
 
-6. **Twilio account ownership.** The account that actually sends (`ACf9a5c2...`) may be registered under
+6. **Twilio account ownership.** The account that actually sends may be registered under
    a different email than you expect. Templates, the WhatsApp sender, and credentials all live in that
    specific account — you need access to **that** account to manage them.
 
 7. **Webhook signature verification.** Twilio webhook verification needs `TWILIO_AUTH_TOKEN`
-   (API keys can't verify signatures). Meta needs `META_APP_SECRET`. There's a toggle in the app
-   Settings to turn verification on/off.
+   (API keys can't verify signatures). Meta needs `META_APP_SECRET`. In production verification is
+   always on; the Settings toggle only works in development.
 
 8. **Background worker on serverless.** The queue worker runs in-process on an always-on host (Render).
    On a serverless host (Vercel) it does **not** run continuously — it needs the cron in `vercel.json`

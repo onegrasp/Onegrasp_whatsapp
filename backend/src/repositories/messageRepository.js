@@ -1,5 +1,6 @@
 const supabase = require("../config/supabase");
 const logger = require("../utils/logger");
+const { fetchAllRows } = require("./queryHelpers");
 
 // messages.media_url is added by migrations/004_message_media.sql. Until that
 // migration runs, inserting the column fails, so retry without it rather than
@@ -58,14 +59,16 @@ const messageRepository = {
     return data;
   },
 
+  // Every message of a campaign (campaigns can exceed Supabase's 1,000-row page).
   async findByCampaignId(campaignId) {
-    const { data, error } = await supabase
-      .from("messages")
-      .select("*")
-      .eq("campaign_id", campaignId)
-      .order("created_at", { ascending: true });
-    if (error) throw error;
-    return data;
+    return fetchAllRows(() =>
+      supabase
+        .from("messages")
+        .select("*")
+        .eq("campaign_id", campaignId)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+    );
   },
 
   // Returns the most recent messages for a phone, oldest first within the page.
@@ -86,54 +89,63 @@ const messageRepository = {
     return { data: (data || []).reverse(), count };
   },
 
+  // Dashboard counts. Delivery figures cover outgoing messages only: replies
+  // are stored as "delivered" too and must not inflate the delivery rate.
   async getStats() {
-    const { count: totalContacts } = await supabase
+    const count = async (build) => {
+      const { count: n, error } = await build(supabase.from("messages").select("*", { count: "exact", head: true }));
+      if (error) throw error;
+      return n || 0;
+    };
+    const outgoing = (q) => q.eq("direction", "outgoing");
+
+    const { count: totalContacts, error: contactsError } = await supabase
       .from("contacts")
       .select("*", { count: "exact", head: true })
       .is("deleted_at", null);
+    if (contactsError) throw contactsError;
 
-    const { count: totalMessages } = await supabase
-      .from("messages")
-      .select("*", { count: "exact", head: true });
+    const [totalMessages, sentMessages, deliveredMessages, readMessages, failedMessages, incomingMessages] = await Promise.all([
+      count((q) => q),
+      count((q) => outgoing(q).eq("status", "sent")),
+      count((q) => outgoing(q).eq("status", "delivered")),
+      count((q) => outgoing(q).eq("status", "read")),
+      count((q) => outgoing(q).in("status", ["failed", "undelivered"])),
+      count((q) => q.eq("direction", "incoming")),
+    ]);
 
-    const { count: sentMessages } = await supabase
-      .from("messages")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "sent")
-      .eq("direction", "outgoing");
-
-    const { count: deliveredMessages } = await supabase
-      .from("messages")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "delivered");
-
-    const { count: readMessages } = await supabase
-      .from("messages")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "read");
-
-    const { count: failedMessages } = await supabase
-      .from("messages")
-      .select("*", { count: "exact", head: true })
-      .in("status", ["failed", "undelivered"]);
-
-    const { count: incomingMessages } = await supabase
-      .from("messages")
-      .select("*", { count: "exact", head: true })
-      .eq("direction", "incoming");
+    // Share of outgoing messages that reached the phone (delivered or read).
+    const outgoingTotal = sentMessages + deliveredMessages + readMessages + failedMessages;
+    const deliveryRate = outgoingTotal > 0 ? Math.round(((deliveredMessages + readMessages) / outgoingTotal) * 100) : 0;
 
     return {
       totalContacts: totalContacts || 0,
-      totalMessages: totalMessages || 0,
-      sentMessages: sentMessages || 0,
-      deliveredMessages: deliveredMessages || 0,
-      readMessages: readMessages || 0,
-      failedMessages: failedMessages || 0,
-      incomingMessages: incomingMessages || 0,
+      totalMessages,
+      sentMessages,
+      deliveredMessages,
+      readMessages,
+      failedMessages,
+      incomingMessages,
+      deliveryRate,
     };
   },
 
   // Has an agent or auto-reply (not a campaign) written to this phone since?
+  // Has this campaign already sent (or delivered, or had read) a message to
+  // this number? Failed attempts don't count.
+  async hasCampaignMessage(campaignId, phone) {
+    const { data, error } = await supabase
+      .from("messages")
+      .select("id")
+      .eq("campaign_id", campaignId)
+      .eq("phone", phone)
+      .eq("direction", "outgoing")
+      .not("status", "in", "(failed,undelivered)")
+      .limit(1);
+    if (error) throw error;
+    return Boolean(data && data.length);
+  },
+
   // Has this number written to us after `sinceISO`?
   async hasIncomingSince(phone, sinceISO) {
     const clean = String(phone || "").replace(/^\+/, "");

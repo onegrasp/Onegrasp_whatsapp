@@ -1,4 +1,4 @@
-const supabase = require("../../config/supabase");
+const settingsRepository = require("../../repositories/settingsRepository");
 const env = require("../../config/env");
 const logger = require("../../utils/logger");
 
@@ -13,8 +13,8 @@ const getMetaConfig = async (forceRefresh = false) => {
   }
 
   try {
-    const { data: settings, error } = await supabase.from("settings").select("*");
-    if (error) throw error;
+    // Read through the repository so saved credentials are decrypted.
+    const settings = await settingsRepository.findAll();
 
     const config = {};
     (settings || []).forEach((s) => {

@@ -1,11 +1,9 @@
 const supabase = require("../config/supabase");
 const logger = require("../utils/logger");
 
-// Strip characters that are significant in PostgREST filter grammar so raw user
-// input (search terms, set names) cannot inject extra filter conditions into an
-// `.or()` / `.ilike()` expression.
-const sanitizeFilterValue = (value) =>
-  String(value == null ? "" : value).replace(/[,()*:"\\{}]/g, " ").trim();
+// sanitizeFilterValue strips PostgREST filter syntax from user input (search
+// terms, set names); fetchAllRows reads past Supabase's 1,000-row limit.
+const { sanitizeFilterValue, fetchAllRows } = require("./queryHelpers");
 
 // Columns added by migrations/005_sending_safeguards.sql. Until it runs,
 // writes that include them fail, so they are dropped and the write retried —
@@ -130,14 +128,12 @@ const contactRepository = {
     };
 
     try {
-      const { data, error } = await supabase
-        .from("contacts")
-        .select("label, tags")
-        .is("deleted_at", null);
+      // Every contact, not just the first 1,000.
+      const data = await fetchAllRows(() =>
+        supabase.from("contacts").select("label, tags").is("deleted_at", null).order("id", { ascending: true })
+      );
 
-      if (error || !data) return setCounts;
-
-      (data || []).forEach((c) => {
+      data.forEach((c) => {
         setCounts.all++;
         const contactSets = new Set();
 
@@ -271,12 +267,10 @@ const contactRepository = {
   },
 
   async exportAll() {
-    const { data, error } = await supabase
-      .from("contacts")
-      .select("*")
-      .is("deleted_at", null);
-    if (error) throw error;
-    return data;
+    // Every contact, not just the first 1,000.
+    return fetchAllRows(() =>
+      supabase.from("contacts").select("*").is("deleted_at", null).order("created_at", { ascending: true }).order("id", { ascending: true })
+    );
   },
 
   async toggleImportant(phone, isImportant) {

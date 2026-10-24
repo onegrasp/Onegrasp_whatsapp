@@ -32,7 +32,7 @@ A self-hosted WhatsApp bulk messaging system that sends via **Twilio** and/or th
 ## Prerequisites
 
 1. **Node.js** v18+
-2. **Supabase** project (run the SQL in `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`, `backend/migrations/004_message_media.sql`, `backend/migrations/005_sending_safeguards.sql`, `backend/migrations/006_quiet_hours_override.sql` and `backend/migrations/007_security_hardening.sql`)
+2. **Supabase** project (run the SQL in `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`, `backend/migrations/004_message_media.sql`, `backend/migrations/005_sending_safeguards.sql`, `backend/migrations/006_quiet_hours_override.sql`, `backend/migrations/007_security_hardening.sql` and `backend/migrations/008_schema_catch_up.sql`)
 3. A WhatsApp sender: a **Twilio** account with WhatsApp enabled, and/or a **Meta Developer Account** with a WhatsApp Business App
 
 ---
@@ -213,12 +213,12 @@ Jane Smith,1,4155238886
    ```
    VITE_API_URL=https://your-backend.render.com
    ```
-4. Update `vite.config.js` proxy target for production (or use env var in `api.js`)
+4. If the backend address isn't `https://onegrasp-backend.onrender.com`, also update `connect-src` in `frontend/vercel.json`
 
 ### Database (Supabase)
 
 1. Create a Supabase project
-2. Run `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`, `backend/migrations/004_message_media.sql`, `backend/migrations/005_sending_safeguards.sql`, `backend/migrations/006_quiet_hours_override.sql` and `backend/migrations/007_security_hardening.sql` in the SQL editor
+2. Run `backend/supabase_schema.sql`, then `backend/migrations.sql`, then `backend/migrations/003_enable_rls.sql`, `backend/migrations/004_message_media.sql`, `backend/migrations/005_sending_safeguards.sql`, `backend/migrations/006_quiet_hours_override.sql`, `backend/migrations/007_security_hardening.sql` and `backend/migrations/008_schema_catch_up.sql` in the SQL editor
 3. Copy the project URL to `SUPABASE_URL` and the **service role** key to `SUPABASE_KEY` (server-side only — never ship it to the browser)
 
 ### Background worker & serverless note
@@ -238,54 +238,46 @@ Bulk sends are queued to the `jobs` table and drained by a worker. On a long-run
 
 Sending free text outside the 24-hour window will result in a failed message from Meta.
 
-### Rate Limits
+### Sending speed and limits
 
-- Meta allows **80 messages/second** on most tiers
-- The system adds a 200ms delay between bulk sends to stay safe
-- For very large lists (10,000+), consider batching into multiple campaigns
+- Campaign messages go out at the **sending rate** set in Settings (default 2 per second, max 10).
+- Template campaigns respect your WhatsApp **daily conversation limit** (set it in Settings) and are
+  split across days when they would exceed it. Quiet hours hold messages overnight.
+- A campaign can have up to 20,000 recipients; contact files are limited to 10 MB / 50,000 rows.
 
 ---
 
 ## Folder Structure
 
 ```
-whatsapp-system/
-├── backend/
-│   ├── models/
-│   │   ├── Contact.js
-│   │   ├── Message.js
-│   │   └── Campaign.js
-│   ├── routes/
-│   │   ├── contactRoutes.js
-│   │   ├── sendRoutes.js
-│   │   ├── webhookRoutes.js
-│   │   └── chatRoutes.js
-│   ├── controllers/
-│   │   ├── sendController.js
-│   │   └── webhookController.js
-│   ├── services/
-│   │   └── whatsappService.js
-│   ├── utils/
-│   │   └── csvParser.js
-│   ├── server.js
-│   ├── .env.example
-│   └── package.json
-│
-└── frontend/
-    ├── src/
-    │   ├── pages/
-    │   │   ├── Dashboard.jsx
-    │   │   ├── BulkSender.jsx
-    │   │   ├── Chats.jsx
-    │   │   ├── Contacts.jsx
-    │   │   └── Campaigns.jsx
-    │   ├── components/
-    │   │   ├── Sidebar.jsx
-    │   │   └── MessageBubble.jsx
-    │   ├── context/
-    │   │   └── SocketContext.jsx
-    │   ├── services/
-    │   │   └── api.js
-    │   └── App.jsx
-    └── package.json
+backend/
+├── server.js                 # entry point (loads src/server.js)
+├── supabase_schema.sql       # base schema
+├── migrations.sql            # follow-up schema changes
+├── migrations/               # numbered migrations 003–008, run in order
+├── scripts/                  # manual maintenance scripts
+├── tests/                    # node:test unit tests (npm test)
+└── src/
+    ├── config/               # env, Supabase client
+    ├── controllers/          # HTTP handlers
+    ├── events/               # event bus + webhook event handlers
+    ├── integrations/         # Twilio and Meta clients, webhooks, error mapping
+    ├── middleware/           # auth, audit trail, rate limits, request log
+    ├── repositories/         # database access
+    ├── routes/v1/            # API routes (mounted at /api/v1 and /api)
+    ├── services/             # business logic (sending policy, sessions, templates…)
+    ├── utils/                # logger, phone and CSV parsing, encryption
+    ├── validators/           # request schemas
+    └── workers/              # queue, campaign sender, retries, status and approval sync
+
+frontend/
+└── src/
+    ├── pages/                # Dashboard, Bulk send, Chats, Contacts, Campaigns, Templates, Logs
+    ├── components/           # app shell, dialogs, UI kit
+    ├── context/              # live updates (Socket.io)
+    ├── lib/                  # config, formatting, helpers
+    └── services/api.js       # API client
+
+docs/drafts/                  # unfinished designs — not to be run
+.github/workflows/ci.yml      # tests, build and dependency audit on every push
 ```

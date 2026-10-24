@@ -283,7 +283,9 @@ export default function Templates() {
         type,
         text: type === "URL" ? "Visit website" : type === "phone" ? "Call us" : "Reply",
         url: type === "URL" ? "https://onegrasp.com" : "",
-        phone: type === "phone" ? "+918977760442" : "",
+        // Left empty (the field is required): a pre-filled number would go
+        // live if nobody changed it.
+        phone: "",
       },
     ]);
   };
@@ -771,7 +773,7 @@ export default function Templates() {
                           required
                           disabled={isFormLocked}
                           className="input input-sm mt-2"
-                          placeholder="+918977760442"
+                          placeholder="+91 98765 43210"
                           value={btn.phone}
                           onChange={(e) => updateButton(index, "phone", e.target.value)}
                         />

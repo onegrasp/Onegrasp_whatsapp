@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { uploadMedia } = require("../../controllers/mediaController");
 
 const uploadsDir = path.join(__dirname, "../../../uploads");
@@ -14,10 +15,11 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadsDir);
   },
+  // Files under /uploads are public (WhatsApp must fetch them), so names are
+  // 128 random bits — not guessable from the upload time.
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `media-${uniqueSuffix}${ext}`);
+    const ext = path.extname(file.originalname || "").toLowerCase().replace(/[^.a-z0-9]/g, "").slice(0, 8);
+    cb(null, `media-${crypto.randomBytes(16).toString("hex")}${ext}`);
   },
 });
 

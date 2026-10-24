@@ -7,10 +7,11 @@ const env = require("../config/env");
 // (`trust proxy = 1`), this prevents clients from rotating the raw
 // X-Forwarded-For header to evade the limits (previously possible).
 
-// General API rate limiter — generous for normal app usage (500 requests / 15 mins)
+// General API rate limiter. Sized for a busy console (live chat refreshes, the
+// Logs page polling) shared by a team behind one office IP.
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: env.NODE_ENV === "production" ? 500 : 5000,
+  max: env.NODE_ENV === "production" ? 2000 : 5000,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -34,7 +35,7 @@ const authLimiter = rateLimit({
     success: false,
     error: {
       code: "rate_limit",
-      message: "Too many failed login attempts. Account locked for this IP. Please try again after 15 minutes.",
+      message: "Too many failed sign-in attempts from this network. Please try again in 15 minutes.",
     },
   },
 });
@@ -71,8 +72,11 @@ const bothPrefixes = (...paths) => paths.flatMap((p) => [`/api/v1${p}`, `/api${p
 const postOnly = (limiter) => (req, res, next) => (req.method === "POST" ? limiter(req, res, next) : next());
 
 const applySecurity = (app) => {
-  // Trust proxy for accurate IP resolution behind Vercel/Render reverse proxies
-  app.set("trust proxy", 1);
+  // How many reverse proxies sit in front of the app (Render = 1). Must match
+  // the real setup: too high lets clients fake their IP and dodge rate limits.
+  // Set TRUST_PROXY_HOPS=2 if e.g. Cloudflare is added in front of Render.
+  const hops = parseInt(process.env.TRUST_PROXY_HOPS || "1", 10);
+  app.set("trust proxy", Number.isInteger(hops) && hops >= 0 ? hops : 1);
   app.disable("x-powered-by");
 
   // Apply Helmet HTTP security headers
