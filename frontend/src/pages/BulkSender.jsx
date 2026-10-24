@@ -89,7 +89,7 @@ function PreflightSummary({ pre, count, type, templateLabel, campaignName, hasIm
         ].map(([k, v]) => (
           <div key={k} className="flex justify-between gap-4 px-3 py-2">
             <dt className="shrink-0 text-gray-500">{k}</dt>
-            <dd className="min-w-0 break-words text-right font-medium text-gray-900">{v}</dd>
+            <dd className="min-w-0 wrap-break-word text-right font-medium text-gray-900">{v}</dd>
           </div>
         ))}
       </dl>

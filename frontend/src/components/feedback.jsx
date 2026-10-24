@@ -54,7 +54,7 @@ export function FeedbackProvider({ children }) {
       {children}
 
       {createPortal(
-        <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex flex-col items-center gap-2 p-4 sm:items-end">
+        <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-0 z-60 flex flex-col items-center gap-2 p-4 sm:items-end">
           {toasts.map((t) => (
             <div
               key={t.id}
@@ -62,7 +62,7 @@ export function FeedbackProvider({ children }) {
               className="pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-800 shadow-overlay"
             >
               <span className="mt-0.5">{TOAST_ICON[t.tone]}</span>
-              <p className="flex-1 break-words">{t.message}</p>
+              <p className="flex-1 wrap-break-word">{t.message}</p>
               <button type="button" onClick={() => dismiss(t.id)} className="-mr-1 text-gray-400 hover:text-gray-600" aria-label="Dismiss">
                 <X size={14} />
               </button>

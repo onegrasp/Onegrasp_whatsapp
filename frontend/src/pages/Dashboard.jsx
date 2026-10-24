@@ -10,7 +10,7 @@ function Metric({ label, value, detail, loading }) {
     <div className="bg-white px-5 py-4">
       <p className="text-sm text-gray-500">{label}</p>
       {loading ? (
-        <div className="mt-2 h-7 w-20 animate-pulse rounded bg-gray-100" />
+        <div className="mt-2 h-7 w-20 animate-pulse rounded-sm bg-gray-100" />
       ) : (
         <p className="mt-1 text-2xl font-semibold tabular-nums text-gray-900">{value}</p>
       )}

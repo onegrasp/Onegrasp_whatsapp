@@ -64,12 +64,12 @@ export default function MessageBubble({ message }) {
   return (
     <div className={`flex ${isOutgoing ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-lg px-3 py-2 text-sm text-gray-900 shadow-sm sm:max-w-[70%] ${
+        className={`max-w-[85%] rounded-lg px-3 py-2 text-sm text-gray-900 shadow-xs sm:max-w-[70%] ${
           isOutgoing ? "rounded-tr-sm bg-[#d9fdd3]" : "rounded-tl-sm bg-white ring-1 ring-gray-200"
         }`}
       >
         {mediaUrl && <Attachment url={mediaUrl} />}
-        {displayText && <p className="whitespace-pre-wrap break-words leading-relaxed">{displayText}</p>}
+        {displayText && <p className="whitespace-pre-wrap wrap-break-word leading-relaxed">{displayText}</p>}
         {templateId && (
           <p className={`flex items-center gap-1 text-xs text-gray-500 ${displayText || mediaUrl ? "mt-1" : ""}`}>
             <FileText size={12} aria-hidden="true" />

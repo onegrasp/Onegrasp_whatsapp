@@ -41,11 +41,11 @@ function LogRow({ log }) {
         <span className="w-14 shrink-0">
           <Badge tone={LEVEL_TONE[log.level] || "neutral"}>{log.level}</Badge>
         </span>
-        <span className="min-w-0 flex-1 break-words text-13 text-gray-800">{log.message}</span>
+        <span className="min-w-0 flex-1 wrap-break-word text-13 text-gray-800">{log.message}</span>
       </button>
 
       {open && hasDetails && (
-        <div className="space-y-2 pb-3 pl-[7.75rem] pr-4 text-xs text-gray-600">
+        <div className="space-y-2 pb-3 pl-31 pr-4 text-xs text-gray-600">
           {log.requestId && (
             <p>
               <span className="text-gray-500">Request ID </span>

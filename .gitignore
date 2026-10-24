@@ -10,3 +10,6 @@ uploads/
 extracted_files/
 .vscode/
 .idea/
+# Browser test output
+test-results/
+playwright-report/

@@ -396,6 +396,13 @@ npm run dev                 # starts on http://localhost:5173
 - Database: run `supabase_schema.sql`, `migrations.sql`, then `migrations/003` to `migrations/008` in order, in the Supabase SQL editor first.
 - Tests: `cd backend && npm test`. GitHub Actions (`.github/workflows/ci.yml`) runs the tests, the
   frontend build and a dependency audit on every push; a red ✗ means don't deploy.
+- Browser tests: `cd frontend && npx playwright install chromium` (once), then `npm run test:e2e`
+  (or `PW_CHANNEL=msedge npm run test:e2e` to use an installed Edge). They build the app and click
+  through sign-in, contacts, chats, templates, bulk send, settings and every page on a phone screen,
+  against a fake backend (`frontend/e2e/fakeApi.js`): no real data is touched and nothing is sent.
+  Add a test there whenever you fix a bug, so it can't come back.
+- Frontend toolchain: Vite 8, React Router 7, Tailwind CSS 4 (theme in `src/index.css`, no
+  `tailwind.config.js`). Node 20.19+ or 22.12+ is needed to build.
 
 ---
 

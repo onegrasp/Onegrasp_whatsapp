@@ -329,7 +329,7 @@ export default function Chats() {
                     <button
                       type="button"
                       onClick={() => handleStarToggle(conv.phone, conv.isImportant)}
-                      className={`absolute right-2 top-2.5 rounded p-1.5 hover:bg-gray-200 focus-visible:opacity-100 ${conv.isImportant ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+                      className={`absolute right-2 top-2.5 rounded-sm p-1.5 hover:bg-gray-200 focus-visible:opacity-100 ${conv.isImportant ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
                       aria-label={conv.isImportant ? `Unstar ${conv.name || conv.phone}` : `Star ${conv.name || conv.phone}`}
                       aria-pressed={Boolean(conv.isImportant)}
                     >

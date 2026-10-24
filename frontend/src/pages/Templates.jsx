@@ -635,7 +635,7 @@ export default function Templates() {
                 )}
               </Field>
             </div>
-            <p className="-mt-3 text-xs text-gray-500">
+            <p className="text-xs text-gray-500">
               Invitations and offers belong in <strong className="font-medium text-gray-700">Marketing</strong>; Meta rejects or re-labels Utility
               templates with promotional content. To send an image, choose <strong className="font-medium text-gray-700">Media (image)</strong>.
             </p>
@@ -783,7 +783,7 @@ export default function Templates() {
                 </ul>
               )}
               {templateType === "media" && buttons.length > 0 && (
-                <p className="hint text-amber-700">Image templates with buttons are sent as a card, which can drop the message text. Build these in WhatsApp Manager instead.</p>
+                <p className="hint">Image templates with buttons are sent as a card. Keep the message under 1,024 characters.</p>
               )}
             </div>
           </form>

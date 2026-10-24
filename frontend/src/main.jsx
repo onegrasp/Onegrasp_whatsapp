@@ -37,7 +37,7 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <div className="flex min-h-dvh items-center justify-center bg-gray-50 px-4">
-          <div className="panel w-full max-w-md p-6 shadow-sm">
+          <div className="panel w-full max-w-md p-6 shadow-xs">
             <h1 className="text-base font-semibold text-gray-900">Something went wrong</h1>
             <p className="mt-1 text-sm text-gray-500">
               This page hit an unexpected error. Your data is safe — reload the page or return to the dashboard.

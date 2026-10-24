@@ -55,7 +55,7 @@ export default function WhatsAppPreview({
       </div>
 
       <div className={`flex flex-1 flex-col justify-end ${large ? "min-h-[380px] p-6" : "min-h-[220px] p-3"}`}>
-        <div className={`ml-auto w-full overflow-hidden rounded-lg rounded-tr-none bg-white shadow-sm ${web ? "max-w-[520px]" : large ? "max-w-[360px]" : "max-w-[300px]"}`}>
+        <div className={`ml-auto w-full overflow-hidden rounded-lg rounded-tr-none bg-white shadow-xs ${web ? "max-w-[520px]" : large ? "max-w-[360px]" : "max-w-[300px]"}`}>
           {headerImageUrl ? (
             <button
               type="button"
@@ -77,7 +77,7 @@ export default function WhatsAppPreview({
           )}
 
           <div className="px-2.5 pb-1.5 pt-2">
-            <p className={`whitespace-pre-wrap break-words leading-relaxed text-gray-900 ${large ? "text-sm" : "text-13"}`}>
+            <p className={`whitespace-pre-wrap wrap-break-word leading-relaxed text-gray-900 ${large ? "text-sm" : "text-13"}`}>
               <FormattedBody text={body} />
             </p>
             <p className="mt-0.5 text-right text-2xs text-gray-400">{formatTime(new Date())}</p>

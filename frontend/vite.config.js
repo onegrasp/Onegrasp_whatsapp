@@ -1,14 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig(({ command }) => ({
+// Production builds are minified with Vite's default minifier, which also
+// removes `debugger` statements. Debug logging is silenced at runtime in
+// production (see src/main.jsx); errors and warnings stay visible.
+export default defineConfig({
   plugins: [react()],
-  // Production bundles drop debug logging and debugger statements. Errors and
-  // warnings stay, so problems can still be investigated in the browser.
-  esbuild: command === "build" ? { pure: ["console.log", "console.info", "console.debug"], drop: ["debugger"] } : {},
   build: {
     sourcemap: false, // Prevents raw source code leakage in browser Inspect / DevTools
-    minify: "esbuild",
   },
   server: {
     port: 5173,
@@ -19,4 +18,4 @@ export default defineConfig(({ command }) => ({
       },
     },
   },
-}));
+});

@@ -38,7 +38,7 @@ export function LoadingRows({ rows = 6, cols = 5 }) {
     <tr key={i}>
       {Array.from({ length: cols }).map((__, j) => (
         <td key={j}>
-          <div className="h-3 w-full max-w-[160px] animate-pulse rounded bg-gray-100" />
+          <div className="h-3 w-full max-w-[160px] animate-pulse rounded-sm bg-gray-100" />
         </td>
       ))}
     </tr>
@@ -133,8 +133,8 @@ export function SegmentedControl({ value, onChange, options, label, size = "md" 
             role="radio"
             aria-checked={active}
             onClick={() => onChange(opt.value)}
-            className={`flex-1 whitespace-nowrap rounded px-3 text-13 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40 ${
-              active ? "bg-white text-gray-900 shadow-sm ring-1 ring-gray-200" : "text-gray-600 hover:text-gray-900"
+            className={`flex-1 whitespace-nowrap rounded px-3 text-13 font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-600/40 ${
+              active ? "bg-white text-gray-900 shadow-xs ring-1 ring-gray-200" : "text-gray-600 hover:text-gray-900"
             }`}
           >
             {opt.label}
@@ -216,7 +216,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`relative flex max-h-[92vh] w-full flex-col rounded-t-lg bg-white shadow-overlay focus:outline-none sm:rounded-lg ${DIALOG_WIDTHS[size]}`}
+        className={`relative flex max-h-[92vh] w-full flex-col rounded-t-lg bg-white shadow-overlay focus:outline-hidden sm:rounded-lg ${DIALOG_WIDTHS[size]}`}
       >
         <div className="flex items-start justify-between gap-4 px-5 pb-3 pt-5">
           <div className="min-w-0">
@@ -256,7 +256,7 @@ export function Sheet({ open, onClose, title, description, actions, children, fo
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={`relative flex h-full w-full flex-col bg-white shadow-overlay focus:outline-none ${width}`}
+        className={`relative flex h-full w-full flex-col bg-white shadow-overlay focus:outline-hidden ${width}`}
       >
         <div className="flex items-center justify-between gap-4 border-b border-gray-200 px-5 py-3.5">
           <div className="min-w-0">

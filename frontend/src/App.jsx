@@ -48,7 +48,7 @@ function Login({ onLoginSuccess }) {
           <span className="text-sm font-semibold text-gray-900">OneGrasp</span>
         </div>
 
-        <div className="panel p-6 shadow-sm">
+        <div className="panel p-6 shadow-xs">
           <h1 className="text-lg font-semibold text-gray-900">Sign in</h1>
           <p className="mt-1 text-sm text-gray-500">Enter the admin password to open the console.</p>
 

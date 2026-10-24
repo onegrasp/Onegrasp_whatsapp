@@ -118,7 +118,7 @@ function NavContent({ unread, onNavigate, onLogout }) {
                     className={({ isActive }) =>
                       `group flex h-8 items-center gap-2.5 rounded-md px-2 text-sm transition-colors ${
                         isActive
-                          ? "bg-white font-medium text-gray-900 shadow-sm ring-1 ring-gray-200"
+                          ? "bg-white font-medium text-gray-900 shadow-xs ring-1 ring-gray-200"
                           : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                       }`
                     }

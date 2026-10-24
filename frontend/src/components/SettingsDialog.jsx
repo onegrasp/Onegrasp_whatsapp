@@ -24,6 +24,7 @@ const DEFAULTS = {
   quietHoursStart: "21:00",
   quietHoursEnd: "09:00",
   quietHoursTimezone: "Asia/Kolkata",
+  messageRetentionDays: 60,
 };
 
 const valueOr = (value, fallback) => (value === undefined || value === null || value === "" ? fallback : value);
@@ -36,6 +37,7 @@ const fromResponse = (data = {}) => ({
   quietHoursStart: valueOr(data.quietHoursStart, DEFAULTS.quietHoursStart),
   quietHoursEnd: valueOr(data.quietHoursEnd, DEFAULTS.quietHoursEnd),
   quietHoursTimezone: valueOr(data.quietHoursTimezone, DEFAULTS.quietHoursTimezone),
+  messageRetentionDays: valueOr(data.messageRetentionDays, DEFAULTS.messageRetentionDays),
   autoReplyEnabled: Boolean(data.autoReplyEnabled),
   autoReplyMessage: data.autoReplyMessage || "",
   twilioMode: data.twilioMode || "sandbox",
@@ -109,7 +111,7 @@ function Toggle({ checked, onChange, label, description, disabled = false }) {
       <span className="relative mt-0.5 inline-flex shrink-0">
         <input type="checkbox" className="peer sr-only" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
         <span className="h-5 w-9 rounded-full bg-gray-300 transition-colors peer-checked:bg-brand-600 peer-focus-visible:ring-2 peer-focus-visible:ring-brand-600/40 peer-focus-visible:ring-offset-1" />
-        <span className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
+        <span className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4" />
       </span>
     </label>
   );
@@ -265,6 +267,24 @@ function SettingsDialog({ open, initial, loadFailed, onRetry, onClose, onSaved }
               </Field>
             </div>
           )}
+        </section>
+
+        <section className="space-y-4 border-t border-gray-200 pt-5">
+          <div>
+            <h3 className="section-title">Data</h3>
+            <p className="mt-0.5 text-xs text-gray-500">How long customer conversations are kept.</p>
+          </div>
+          <Field
+            label="Delete messages older than"
+            hint="Chat and campaign messages, and conversations with no activity since, are deleted permanently. Contacts and campaign totals are kept. Minimum 30 days; 0 keeps everything."
+          >
+            {(id) => (
+              <div className="flex items-center gap-2">
+                <input id={id} type="number" min="0" max="3650" step="1" className="input w-24 tabular-nums" value={form.messageRetentionDays} onChange={(e) => set("messageRetentionDays")(e.target.value)} />
+                <span className="text-sm text-gray-500">days</span>
+              </div>
+            )}
+          </Field>
         </section>
 
         <section className="space-y-4 border-t border-gray-200 pt-5">
