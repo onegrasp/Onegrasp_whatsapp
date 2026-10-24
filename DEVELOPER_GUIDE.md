@@ -363,7 +363,7 @@ Set these on the **backend host (Render)**. See [`backend/.env.example`](backend
 | `TWILIO_MESSAGING_SERVICE_SID` | optional | If you use a Messaging Service (`MG...`). |
 | `CRON_SECRET` | ⚠️ | Protects the `/api/jobs/process-queue` endpoint (needed only on serverless hosting). |
 | `META_*` | optional | Only if using Meta instead of/alongside Twilio (`META_ACCESS_TOKEN`, `META_PHONE_NUMBER_ID`, `META_APP_SECRET`, etc.). |
-| `DEFAULT_COUNTRY_CODE` | optional | Country code for bare local numbers (default `91` = India). |
+| `DEFAULT_COUNTRY_CODE` | optional | Country code given to numbers written without one (default `91` = India): a leading `0`, or 10 digits or fewer. Numbers from any other country must include their country code (`+1 415…`) or use the import's Country Code column. Numbers starting with `+`/`00`, or longer than 10 digits, are kept as they are. |
 | `SETTINGS_ENCRYPTION_KEY` | optional | Key for encrypting credentials saved in Settings. Defaults to `JWT_SECRET`. Set it if you ever plan to rotate `JWT_SECRET`. |
 | `TRUST_PROXY_HOPS` | optional | Reverse proxies in front of the app (default `1`, right for Render). Set `2` if you add e.g. Cloudflare in front. |
 | `META_WEBHOOK_VERIFY_TOKEN` | Meta only | Required to verify a Meta webhook; there is no built-in default. |

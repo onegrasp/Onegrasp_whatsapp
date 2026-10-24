@@ -222,7 +222,8 @@ export default function ImportContactsDialog({ open, onClose, defaultSet = "all"
             <ul className="mt-1.5 list-disc space-y-1 pl-4">
               <li>
                 Columns: <strong className="font-medium text-gray-800">Name</strong>, <strong className="font-medium text-gray-800">Country Code</strong> (e.g. 91) and{" "}
-                <strong className="font-medium text-gray-800">Phone</strong>. Country Code is optional if numbers already include it.
+                <strong className="font-medium text-gray-800">Phone</strong>. Country Code is optional if numbers already include it; numbers
+                without one get the default country code (+91), so add it for contacts in other countries.
               </li>
               <li>In Excel, format the Phone column as Text before typing numbers, so long numbers aren't rounded.</li>
               <li>Numbers already in your contacts are reported, not duplicated.</li>

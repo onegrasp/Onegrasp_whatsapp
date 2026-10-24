@@ -1,10 +1,17 @@
 // Shared phone number validation and normalization utility (E.164 with + format)
 
-// Default country code used to expand bare local numbers. Configure via
-// DEFAULT_COUNTRY_CODE (defaults to India, "91", for backward compatibility).
-// The 10-digit auto-expansion heuristic below is intentionally applied only
-// for India's mobile format; other country codes expand 00/0 prefixes only.
+// Country code given to numbers written without one. Configure via
+// DEFAULT_COUNTRY_CODE (defaults to India, "91").
+//
+// A number written with "+" or "00" is international and kept as it is.
+// Otherwise a number with a leading trunk "0", or of at most
+// MAX_NATIONAL_DIGITS digits, is a national number and gets the default
+// country code; a longer one is taken to already start with its country code
+// (e.g. 919876543210). A bare national number can't reveal its country, so
+// numbers from any other country must include their country code (or come
+// with a "Country Code" column on import).
 const DEFAULT_CC = process.env.DEFAULT_COUNTRY_CODE || "91";
+const MAX_NATIONAL_DIGITS = 10;
 
 // Invisible characters that spreadsheets and copy/paste often carry along with
 // a number (non-breaking spaces, zero-width and direction marks, BOM). They
@@ -18,26 +25,27 @@ const normalizePhone = (phoneStr, defaultCountryCode = DEFAULT_CC) => {
 
   let clean = String(phoneStr).replace(INVISIBLE_CHARS, "").trim().replace(/^whatsapp:/i, "");
 
+  // A value with letters is not a phone number: leave it for validation to reject.
+  if (hasLetters(clean)) return `+${clean.replace(/[\s\-\(\)\+]/g, "")}`;
+
+  // "+" before the first digit (possibly after stray symbols, e.g. "?+91 …")
+  // means the number is already international.
+  const hasPlus = /^[^\d]*\+/.test(clean);
+
   // Drop separators and stray symbols (spaces, dashes, dots, brackets, commas,
-  // slashes, "?"...). A value with letters is not a phone number, so leave it
-  // as-is and let validation reject it.
-  clean = hasLetters(clean) ? clean.replace(/[\s\-\(\)\+]/g, "") : clean.replace(/\D/g, "");
+  // slashes, "?"...).
+  clean = clean.replace(/\D/g, "");
 
-  // Strip leading zeroes (e.g., 00919876543210 -> 919876543210, 09876543210 -> 9876543210)
-  if (clean.startsWith("00")) {
-    clean = clean.slice(2);
-  } else if (clean.startsWith("0") && clean.length >= 11) {
-    clean = clean.slice(1);
-  } else if (clean.startsWith("0") && clean.length === 10) {
-    clean = clean.slice(1);
-  }
+  // International: "+…" or "00…" (00919876543210, 0014155238886).
+  if (hasPlus) return `+${clean}`;
+  if (clean.startsWith("00")) return `+${clean.slice(2)}`;
 
-  // If 10 digits starting with 6, 7, 8, or 9 (standard Indian mobile format),
-  // expand using the Indian country code only when that is the configured default.
-  if (defaultCountryCode === "91" && clean.length === 10 && /^[6-9]/.test(clean)) {
-    clean = `${defaultCountryCode}${clean}`;
-  }
-
+  // National: a trunk "0" (09876543210) or a short number (9876543210,
+  // 4155238886) gets the default country code. Longer numbers already
+  // carry one (919876543210, 14155238886).
+  const cc = String(defaultCountryCode ?? "").replace(/\D/g, "");
+  if (clean.startsWith("0")) return `+${cc}${clean.replace(/^0+/, "")}`;
+  if (clean.length <= MAX_NATIONAL_DIGITS) return `+${cc}${clean}`;
   return `+${clean}`;
 };
 
